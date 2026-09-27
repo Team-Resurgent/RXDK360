@@ -383,6 +383,26 @@ def main():
 
     objects = compile_sources(args.sources, workdir, args.cc, args.clang, args.cflag)
 
+    # [interim ABI bridge] Some translated-MSVC d3d9 entry points take a 64-bit
+    # integer BY VALUE, which the Xenon MS ABI passes in ONE 64-bit register. Our
+    # 32-bit clang splits it across a register PAIR, so the callee loses the low
+    # 32 bits (root cause of the AdvancedLighting vertex-fetch spikes). Link the
+    # asm shims (runtime/xbox/d3d9_abi_shims.s) and --wrap the affected symbols so
+    # the pair is re-packed into a single 64-bit register before the real call.
+    # Harmless when a title links no d3d9 (the shim GC's, --wrap is a no-op).
+    # REMOVE this and the shims once clang moves to powerpc64-unknown-xbox360
+    # (docs/ilp32-ppc64-abi-plan.md) -- the fixed clang makes the re-pack wrong.
+    d3d9_wraps = []
+    if args.cc == "clang" and not args.no_default_libs:
+        shim_s = os.path.join(ROOT, "runtime", "xbox", "d3d9_abi_shims.s")
+        shim_o = out_base + "_d3d9shims.o"
+        rs = run([args.clang, "--target=" + MS_TRIPLE, "-c", shim_s, "-o", shim_o])
+        if rs.returncode != 0:
+            sys.exit(f"assembling d3d9 ABI shims failed:\n{rs.stderr}")
+        objects.append(shim_o)
+        d3d9_wraps = ["-Wl,--wrap,D3DDevice_SetStreamSource"]
+    ldflags_all = list(args.ldflag) + d3d9_wraps
+
     layout = out_base + ".ld"
     write_layout(layout, args.base, page)
 
@@ -390,7 +410,7 @@ def main():
 
     # trial link (no stubs) to discover the undefined kernel imports
     trial = link(objects, libs, None, layout, elf, lld=args.lld, gc=True,
-                 ldflags=args.ldflag)
+                 ldflags=ldflags_all)
     undefined = undefined_from(trial) if trial.returncode != 0 else []
 
     manifest = None
@@ -417,7 +437,7 @@ def main():
 
     # final link
     final = link(objects, libs, stubs, layout, elf, lld=args.lld, gc=True,
-                 ldflags=args.ldflag)
+                 ldflags=ldflags_all)
     if final.returncode != 0:
         sys.exit(f"link failed:\n{final.stdout}{final.stderr}")
 
