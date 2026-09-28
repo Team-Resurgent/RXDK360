@@ -38,7 +38,7 @@ import gen_import_stubs as g  # noqa: E402
 
 CLANG = os.environ.get("RXDK_CLANG", os.path.join(ROOT, "build", "llvm", "bin", "clang.exe"))
 AR = os.environ.get("RXDK_AR", os.path.join(ROOT, "build", "llvm", "bin", "llvm-ar.exe"))
-TRIPLE = "powerpc-unknown-xbox360"
+TRIPLE = "powerpc64-unknown-xbox360"
 
 
 def emit_asm(index):

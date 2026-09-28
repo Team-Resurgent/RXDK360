@@ -36,7 +36,7 @@ CONFIG = os.path.join(ROOT, "runtime", "config")
 
 CLANG = os.environ.get("RXDK_CLANG", os.path.join(ROOT, "build", "llvm", "bin", "clang.exe"))
 AR = os.environ.get("RXDK_AR", os.path.join(ROOT, "build", "llvm", "bin", "llvm-ar.exe"))
-TRIPLE = "powerpc-unknown-xbox360"
+TRIPLE = "powerpc64-unknown-xbox360"
 
 # NOTE: the picolibc C-header include must come AFTER the C++ header dirs, or
 # libc++'s <cstdlib> grabs picolibc's <stdlib.h> instead of libc++'s wrapper.
@@ -87,6 +87,13 @@ ABI_FLAGS = COMMON + [
     # Ask for it here so <locale>/<iostream> build (also exposes clock_gettime,
     # strerror_r ... but we still force-include the prereq for belt-and-braces).
     "-D_GNU_SOURCE",
+    # libc++'s picolibc ctype_base.h (the _LIBCPP_LIBC_NEWLIB path) initializes
+    # its ctype masks from the single-underscore newlib macros _S/_P/_U/_L/...
+    # picolibc reserves those identifiers and only exposes them for C++ on i386
+    # or behind this opt-in (see vendor/picolibc/libc/include/ctype.h) so title
+    # code pulling the XDK headers (which use _X/_Y as parameter names) is not
+    # polluted. On PowerPC the libc++ build must ask for them explicitly.
+    "-D_PICOLIBC_LEGACY_CTYPE_MACROS",
     # (The old -D_SC_NPROCESSORS_ONLN=200 override is gone: the consolidated
     # picolibc 'xbox' branch defines _SC_NPROCESSORS_ONLN itself, and
     # runtime/xbox/sysconf.c now answers on picolibc's own value.)

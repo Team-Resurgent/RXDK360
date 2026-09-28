@@ -29,7 +29,7 @@ CONFIG = os.path.join(ROOT, "runtime", "config")
 
 CLANG = os.environ.get("RXDK_CLANG", os.path.join(ROOT, "build", "llvm", "bin", "clang.exe"))
 AR = os.environ.get("RXDK_AR", os.path.join(ROOT, "build", "llvm", "bin", "llvm-ar.exe"))
-TRIPLE = "powerpc-unknown-xbox360"
+TRIPLE = "powerpc64-unknown-xbox360"
 
 # picolibc's own flags (mirrors RXDK-Libs build/xbox_target.zig picolibcFlags):
 # -fno-builtin is essential -- picolibc's memcpy/strlen ARE the builtins, so

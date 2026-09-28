@@ -23,7 +23,7 @@ ROOT = os.path.dirname(HERE)
 
 CLANG = os.environ.get("RXDK_CLANG", os.path.join(ROOT, "build", "llvm", "bin", "clang.exe"))
 AR = os.environ.get("RXDK_AR", os.path.join(ROOT, "build", "llvm", "bin", "llvm-ar.exe"))
-TRIPLE = "powerpc-unknown-xbox360"
+TRIPLE = "powerpc64-unknown-xbox360"
 
 XDK_INC = os.environ.get("RXDK_XDK_INC",
                          r"C:\Program Files (x86)\Microsoft Xbox 360 SDK\include\xbox")
