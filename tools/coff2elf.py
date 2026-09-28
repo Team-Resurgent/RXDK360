@@ -195,6 +195,7 @@ class CoffObject:
 # ELF constants
 ET_REL = 1
 EM_PPC = 20
+EM_PPC64 = 21
 SHT_PROGBITS, SHT_SYMTAB, SHT_STRTAB, SHT_RELA, SHT_NOBITS = 1, 2, 3, 4, 8
 SHT_GROUP = 17
 SHF_WRITE, SHF_ALLOC, SHF_EXECINSTR, SHF_GROUP = 0x1, 0x2, 0x4, 0x200
@@ -330,8 +331,12 @@ def _keep_code_signature_strong(signame, external_strong):
 
 
 def coff_to_elf(obj, warn=print, noncomdat_strong=frozenset(),
-                external_strong=frozenset()):
-    """Translate one parsed CoffObject to PPC32 big-endian ELF32 bytes.
+                external_strong=frozenset(), elf64=False):
+    """Translate one parsed CoffObject to PPC big-endian ELF bytes.
+
+    elf64=False emits ELFCLASS32/EM_PPC (the legacy powerpc-unknown-xbox360
+    pipeline); elf64=True emits ELFCLASS64/EM_PPC64 with the same 32-bit content
+    (ILP32-on-ppc64) to match the powerpc64-unknown-xbox360 clang.
 
     Each kept COFF section becomes its own ELF section in the same order, so a
     symbol's 1-based section number and a relocation's section-relative offset
@@ -606,7 +611,7 @@ def coff_to_elf(obj, warn=print, noncomdat_strong=frozenset(),
             elf_syms[k] = (noff, val, sz, (STB_WEAK << 4) | (info & 0xF), other, shndx)
 
     return _write_elf(kept, elf_syms, strtab, first_global, rela,
-                      coff_to_elfshndx, groups)
+                      coff_to_elfshndx, groups, elf64=elf64)
 
 
 def _enumerate_coff_syms(obj):
@@ -728,7 +733,7 @@ class ElfSec:
 
 
 def _write_elf(kept, elf_syms, strtab, first_global, rela, coff_to_elfshndx,
-               groups=None):
+               groups=None, elf64=False):
     groups = groups or {}
     # which kept sections belong to a group (get SHF_GROUP): map their kept
     # elf_idx to the group root so their .rela joins the same group too.
@@ -759,10 +764,19 @@ def _write_elf(kept, elf_syms, strtab, first_global, rela, coff_to_elfshndx,
         else:
             secs.append(ElfSec(name, SHT_PROGBITS, flags, s.data, align=align))
 
-    sym_bytes = b"".join(struct.pack(">IIIBBH", *s) for s in elf_syms)
+    # elf_syms tuples are (name, value, size, info, other, shndx). Elf32_Sym is
+    # name,value,size,info,other,shndx; Elf64_Sym reorders to
+    # name,info,other,shndx,value,size with 8-byte value/size.
+    if elf64:
+        sym_bytes = b"".join(struct.pack(">IBBHQQ", n, inf, oth, shn, val, sz)
+                             for (n, val, sz, inf, oth, shn) in elf_syms)
+        sym_entsize, sym_align = 24, 8
+    else:
+        sym_bytes = b"".join(struct.pack(">IIIBBH", *s) for s in elf_syms)
+        sym_entsize, sym_align = 16, 4
     symtab_idx = len(secs)
     secs.append(ElfSec(".symtab", SHT_SYMTAB, data=sym_bytes, link=symtab_idx + 1,
-                       info=first_global, align=4, entsize=16))
+                       info=first_global, align=sym_align, entsize=sym_entsize))
     secs.append(ElfSec(".strtab", SHT_STRTAB, data=bytes(strtab.buf), align=1))
 
     # group root elf_idx -> list of secs[] indices that are its members (the
@@ -774,11 +788,19 @@ def _write_elf(kept, elf_syms, strtab, first_global, rela, coff_to_elfshndx,
     for elf_idx, entries in rela.items():
         target = kept_elf_index[elf_idx]
         rflags = SHF_GROUP if elf_idx in member_root else 0
-        blob = b"".join(struct.pack(">IIi", off, (sym << 8) | rtype, add)
-                        for off, sym, rtype, add in entries)
+        # Elf32_Rela: offset(4), info=sym<<8|type (4), addend(4).
+        # Elf64_Rela: offset(8), info=sym<<32|type (8), addend(8).
+        if elf64:
+            blob = b"".join(struct.pack(">QQq", off, (sym << 32) | rtype, add)
+                            for off, sym, rtype, add in entries)
+            rela_entsize, rela_align = 24, 8
+        else:
+            blob = b"".join(struct.pack(">IIi", off, (sym << 8) | rtype, add)
+                            for off, sym, rtype, add in entries)
+            rela_entsize, rela_align = 12, 4
         secs.append(ElfSec(".rela" + secs[target].name, SHT_RELA, data=blob,
-                           link=symtab_idx, info=target, align=4, entsize=12,
-                           flags=rflags))
+                           link=symtab_idx, info=target, align=rela_align,
+                           entsize=rela_entsize, flags=rflags))
         if elf_idx in member_root:
             group_secidx[member_root[elf_idx]].append(len(secs) - 1)
 
@@ -800,9 +822,12 @@ def _write_elf(kept, elf_syms, strtab, first_global, rela, coff_to_elfshndx,
     secs[-1].data = bytes(shstr.buf)
     secs[-1].size = len(secs[-1].data)
 
-    # lay out: ELF header (52), then each non-empty section's bytes (aligned),
-    # then the section header table.
-    offset = 52
+    # lay out: ELF header (52 for ELF32, 64 for ELF64), then each non-empty
+    # section's bytes (aligned), then the section header table.
+    ehsize = 64 if elf64 else 52
+    shentsize = 64 if elf64 else 40
+    align_end = 8 if elf64 else 4
+    offset = ehsize
     for sec in secs:
         if sec.typ in (0, SHT_NOBITS):
             sec.offset = 0
@@ -812,17 +837,25 @@ def _write_elf(kept, elf_syms, strtab, first_global, rela, coff_to_elfshndx,
         sec.offset = offset
         offset += len(sec.data)
 
-    if offset % 4:
-        offset += 4 - (offset % 4)
+    if offset % align_end:
+        offset += align_end - (offset % align_end)
     shoff = offset
 
     out = bytearray()
-    e_ident = b"\x7fELF" + bytes([1, 2, 1, 0]) + b"\0" * 8   # class32, BE, ver1
+    ei_class = 2 if elf64 else 1
+    e_ident = b"\x7fELF" + bytes([ei_class, 2, 1, 0]) + b"\0" * 8   # BE, ver1
     out += e_ident
-    out += struct.pack(">HHIIIIIHHHHHH",
-                       ET_REL, EM_PPC, 1, 0, 0, shoff, 0,
-                       52, 0, 0, 40, len(secs), shstrtab_idx)
-    out += b"\0" * (52 - len(out))
+    if elf64:
+        # Elf64_Ehdr: type,machine,version, entry(8),phoff(8),shoff(8), flags,
+        # ehsize,phentsize,phnum,shentsize,shnum,shstrndx.
+        out += struct.pack(">HHIQQQIHHHHHH",
+                           ET_REL, EM_PPC64, 1, 0, 0, shoff, 0,
+                           ehsize, 0, 0, shentsize, len(secs), shstrtab_idx)
+    else:
+        out += struct.pack(">HHIIIIIHHHHHH",
+                           ET_REL, EM_PPC, 1, 0, 0, shoff, 0,
+                           ehsize, 0, 0, shentsize, len(secs), shstrtab_idx)
+    out += b"\0" * (ehsize - len(out))
 
     for sec in secs:
         if sec.typ in (0, SHT_NOBITS) or not sec.data:
@@ -834,9 +867,18 @@ def _write_elf(kept, elf_syms, strtab, first_global, rela, coff_to_elfshndx,
         out += b"\0" * (shoff - len(out))
 
     for sec in secs:
-        out += struct.pack(">IIIIIIIIII",
-                           sec._nameoff, sec.typ, sec.flags, 0, sec.offset,
-                           sec.size, sec.link, sec.info, sec.align, sec.entsize)
+        if elf64:
+            # Elf64_Shdr: name,type, flags(8),addr(8),offset(8),size(8),
+            # link,info, addralign(8),entsize(8).
+            out += struct.pack(">IIQQQQIIQQ",
+                               sec._nameoff, sec.typ, sec.flags, 0, sec.offset,
+                               sec.size, sec.link, sec.info, sec.align,
+                               sec.entsize)
+        else:
+            out += struct.pack(">IIIIIIIIII",
+                               sec._nameoff, sec.typ, sec.flags, 0, sec.offset,
+                               sec.size, sec.link, sec.info, sec.align,
+                               sec.entsize)
     return bytes(out)
 
 
@@ -922,10 +964,10 @@ def find_member(path, needle):
     sys.exit(f"no PowerPC member matching {needle!r}")
 
 
-def cmd_emit(path, member, out):
+def cmd_emit(path, member, out, elf64=False):
     name, obj = find_member(path, member)
     print(f"translating {name}")
-    elf = coff_to_elf(obj)
+    elf = coff_to_elf(obj, elf64=elf64)
     with open(out, "wb") as f:
         f.write(elf)
     print(f"wrote {out} ({len(elf)} bytes)")
@@ -1019,7 +1061,7 @@ def runtime_defined_symbols(path):
     return set()
 
 
-def cmd_archive(path, out_a, out_manifest, runtime_libs=()):
+def cmd_archive(path, out_a, out_manifest, runtime_libs=(), elf64=False):
     import json
     blob = open(path, "rb").read()
     members = []
@@ -1049,7 +1091,7 @@ def cmd_archive(path, out_a, out_manifest, runtime_libs=()):
     for member, longnames, obj in coff_members:
         elf = coff_to_elf(obj, warn=lambda m: None,
                           noncomdat_strong=noncomdat_strong,
-                          external_strong=external_strong)
+                          external_strong=external_strong, elf64=elf64)
         base = member_name(member.name, longnames).replace("\\", "/").split("/")[-1]
         base = base[:-4] if base.endswith(".obj") else base
         n = seen.get(base, 0)
@@ -1073,10 +1115,13 @@ def main():
     d.add_argument("lib")
     s = sub.add_parser("survey")
     s.add_argument("libs", nargs="+")
-    e = sub.add_parser("emit", help="translate one object to a PPC32 ELF")
+    e = sub.add_parser("emit", help="translate one object to a PPC ELF")
     e.add_argument("lib")
     e.add_argument("member", help="substring of the member (object) name")
     e.add_argument("-o", "--out", default="out.o")
+    e.add_argument("--ppc64", action="store_true",
+                   help="emit ELFCLASS64/EM_PPC64 (powerpc64-unknown-xbox360) "
+                        "instead of ELF32; 32-bit content unchanged")
     t = sub.add_parser("translate-all", help="translate every object, report problems")
     t.add_argument("lib")
     a = sub.add_parser("archive", help="translate a whole .lib to an ELF .a + import manifest")
@@ -1086,6 +1131,9 @@ def main():
     a.add_argument("--runtime", action="append", default=[],
                    help="a runtime archive (libc.a/libcpp.a) whose defined symbols "
                         "form the external-strong set; repeatable")
+    a.add_argument("--ppc64", action="store_true",
+                   help="emit ELFCLASS64/EM_PPC64 (powerpc64-unknown-xbox360) "
+                        "instead of ELF32; 32-bit content unchanged")
     args = ap.parse_args()
 
     if args.cmd == "dump":
@@ -1093,12 +1141,13 @@ def main():
     elif args.cmd == "survey":
         cmd_survey(args.libs)
     elif args.cmd == "emit":
-        cmd_emit(args.lib, args.member, args.out)
+        cmd_emit(args.lib, args.member, args.out, elf64=args.ppc64)
     elif args.cmd == "translate-all":
         cmd_translate_all(args.lib)
     elif args.cmd == "archive":
         manifest = args.manifest or (args.out.rsplit(".", 1)[0] + ".imports.json")
-        cmd_archive(args.lib, args.out, manifest, runtime_libs=args.runtime)
+        cmd_archive(args.lib, args.out, manifest, runtime_libs=args.runtime,
+                    elf64=args.ppc64)
 
 
 if __name__ == "__main__":
