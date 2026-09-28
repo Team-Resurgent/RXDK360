@@ -64,7 +64,7 @@ SECTIONINFO_DATA = 2
 SECTIONINFO_READONLY = 3
 
 
-# ---- ELF32 big-endian reading -----------------------------------------------
+# ---- ELF big-endian reading (ELFCLASS32 and ELFCLASS64) ---------------------
 
 # ELF section flags / types
 SHF_ALLOC, SHF_WRITE, SHF_EXECINSTR = 0x2, 0x1, 0x4
@@ -75,6 +75,83 @@ class ElfSection:
     __slots__ = ("name", "vaddr", "data", "memsize", "flags", "typ")
 
 
+def _elf_geom(blob):
+    """Parse a big-endian PPC ELF header, ELFCLASS32 or ELFCLASS64.
+
+    The powerpc64-unknown-xbox360 toolchain links ELFCLASS64 objects (ILP32
+    content in a 64-bit container), while the legacy powerpc-unknown-xbox360
+    path links ELFCLASS32. Both produce the same 32-bit image; only the ELF
+    header/section/symbol/program-header field widths differ. Returns a dict
+    exposing e_entry/e_shnum/e_shstrndx and uniform reader closures shdr(i)
+    (a 10-tuple name,type,flags,addr,off,size,link,info,align,entsize regardless
+    of class), load_vaddrs() and sym(o) -> (st_name, st_value).
+    """
+    if blob[:4] != b"\x7fELF":
+        sys.exit("not an ELF file")
+    if blob[5] != 2:
+        sys.exit("expected a big-endian ELF (PPC)")
+    is64 = blob[4] == 2
+    if is64:
+        (e_entry,) = struct.unpack_from(">Q", blob, 0x18)
+        (e_phoff,) = struct.unpack_from(">Q", blob, 0x20)
+        (e_shoff,) = struct.unpack_from(">Q", blob, 0x28)
+        e_phentsize, e_phnum = struct.unpack_from(">HH", blob, 0x36)
+        e_shentsize, e_shnum, e_shstrndx = struct.unpack_from(">HHH", blob, 0x3A)
+
+        def shdr(i):
+            o = e_shoff + i * e_shentsize
+            name, typ = struct.unpack_from(">II", blob, o)
+            flags, addr, off, size = struct.unpack_from(">QQQQ", blob, o + 8)
+            link, info = struct.unpack_from(">II", blob, o + 0x28)
+            align, entsize = struct.unpack_from(">QQ", blob, o + 0x30)
+            return (name, typ, flags, addr, off, size, link, info, align, entsize)
+
+        def load_vaddrs():
+            # Elf64_Phdr: type(4), flags(4), offset(8), vaddr(8), ...
+            vs = []
+            for i in range(e_phnum):
+                o = e_phoff + i * e_phentsize
+                (p_type,) = struct.unpack_from(">I", blob, o)
+                (p_vaddr,) = struct.unpack_from(">Q", blob, o + 0x10)
+                if p_type == 1:
+                    vs.append(p_vaddr)
+            return vs
+
+        def sym(o):
+            # Elf64_Sym: name(4), info(1), other(1), shndx(2), value(8), size(8)
+            (st_name,) = struct.unpack_from(">I", blob, o)
+            (st_value,) = struct.unpack_from(">Q", blob, o + 8)
+            return st_name, st_value
+    else:
+        (e_entry,) = struct.unpack_from(">I", blob, 0x18)
+        (e_phoff,) = struct.unpack_from(">I", blob, 0x1C)
+        (e_shoff,) = struct.unpack_from(">I", blob, 0x20)
+        e_phentsize, e_phnum = struct.unpack_from(">HH", blob, 0x2A)
+        e_shentsize, e_shnum, e_shstrndx = struct.unpack_from(">HHH", blob, 0x2E)
+
+        def shdr(i):
+            o = e_shoff + i * e_shentsize
+            return struct.unpack_from(">IIIIIIIIII", blob, o)
+
+        def load_vaddrs():
+            # Elf32_Phdr: type(4), offset(4), vaddr(4), ...
+            vs = []
+            for i in range(e_phnum):
+                o = e_phoff + i * e_phentsize
+                p_type, _off, p_vaddr = struct.unpack_from(">III", blob, o)
+                if p_type == 1:
+                    vs.append(p_vaddr)
+            return vs
+
+        def sym(o):
+            # Elf32_Sym: name(4), value(4), size(4), info(1), other(1), shndx(2)
+            return struct.unpack_from(">II", blob, o)
+
+    return dict(is64=is64, e_entry=e_entry, e_shnum=e_shnum,
+                e_shstrndx=e_shstrndx, shdr=shdr, load_vaddrs=load_vaddrs,
+                sym=sym)
+
+
 def read_elf_sections(blob):
     """Return (load_base, [ElfSection], entry) for the allocatable sections.
 
@@ -82,31 +159,17 @@ def read_elf_sections(blob):
     ELF's own headers do not end up in the image, and so each section can carry
     its address and flags into a matching PE section.
     """
-    if blob[:4] != b"\x7fELF":
-        sys.exit("not an ELF file")
-    if blob[4] != 1 or blob[5] != 2:
-        sys.exit("expected a 32-bit big-endian ELF (PPC)")
-    (e_entry,) = struct.unpack_from(">I", blob, 0x18)
-    (e_phoff,) = struct.unpack_from(">I", blob, 0x1C)
-    (e_shoff,) = struct.unpack_from(">I", blob, 0x20)
-    e_phentsize, e_phnum = struct.unpack_from(">HH", blob, 0x2A)
-    e_shentsize, e_shnum, e_shstrndx = struct.unpack_from(">HHH", blob, 0x2E)
+    g = _elf_geom(blob)
+    e_entry = g["e_entry"]
+    e_shnum = g["e_shnum"]
+    shdr = g["shdr"]
 
     # the image base is the lowest PT_LOAD vaddr (what --image-base set), not the
     # lowest section -- lld can place the first section a little above the base
-    load_vaddrs = []
-    for i in range(e_phnum):
-        o = e_phoff + i * e_phentsize
-        p_type, _off, p_vaddr = struct.unpack_from(">III", blob, o)
-        if p_type == 1:
-            load_vaddrs.append(p_vaddr)
+    load_vaddrs = g["load_vaddrs"]()
     image_base = min(load_vaddrs) if load_vaddrs else None
 
-    def shdr(i):
-        o = e_shoff + i * e_shentsize
-        return struct.unpack_from(">IIIIIIIIII", blob, o)   # name,type,flags,addr,off,size,...
-
-    strtab_off = shdr(e_shstrndx)[4]
+    strtab_off = shdr(g["e_shstrndx"])[4]
 
     def name(off):
         end = blob.index(b"\0", strtab_off + off)
@@ -308,14 +371,11 @@ def build_execution_info(title_id):
 
 def read_elf_symbol_addrs(blob):
     """Map global/defined symbol name -> virtual address, from the ELF symtab."""
-    (e_shoff,) = struct.unpack_from(">I", blob, 0x20)
-    e_shentsize, e_shnum, e_shstrndx = struct.unpack_from(">HHH", blob, 0x2E)
-
-    def sh(i):
-        return struct.unpack_from(">IIIIIIIIII", blob, e_shoff + i * e_shentsize)
+    g = _elf_geom(blob)
+    sh = g["shdr"]
 
     symtab = strtab = None
-    for i in range(e_shnum):
+    for i in range(g["e_shnum"]):
         typ = sh(i)[1]
         if typ == 2:                                # SHT_SYMTAB
             symtab = sh(i)
@@ -326,8 +386,7 @@ def read_elf_symbol_addrs(blob):
     off, size, entsize = symtab[4], symtab[5], symtab[9]
     stroff = strtab[4]
     for k in range(size // entsize):
-        o = off + k * entsize
-        st_name, st_value = struct.unpack_from(">II", blob, o)
+        st_name, st_value = g["sym"](off + k * entsize)
         if st_name and st_value:
             end = blob.index(b"\0", stroff + st_name)
             out[blob[stroff + st_name:end].decode("utf-8", "replace")] = st_value

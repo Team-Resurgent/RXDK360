@@ -82,14 +82,44 @@ def build_ordinal_index(xdk_lib_dir):
 
 
 def read_undefined_symbols(blob):
-    """Undefined global symbol names from an ELF32 big-endian object."""
+    """Undefined global symbol names from a big-endian PPC ELF object.
+
+    Handles both ELFCLASS32 (powerpc-unknown-xbox360) and ELFCLASS64
+    (powerpc64-unknown-xbox360, ILP32-on-ppc64) objects.
+    """
     if blob[:4] != b"\x7fELF":
         sys.exit("not an ELF object")
-    (e_shoff,) = struct.unpack_from(">I", blob, 0x20)
-    e_shentsize, e_shnum, e_shstrndx = struct.unpack_from(">HHH", blob, 0x2E)
+    is64 = blob[4] == 2
+    if is64:
+        (e_shoff,) = struct.unpack_from(">Q", blob, 0x28)
+        e_shentsize, e_shnum, e_shstrndx = struct.unpack_from(">HHH", blob, 0x3A)
 
-    def sh(i):
-        return struct.unpack_from(">IIIIIIIIII", blob, e_shoff + i * e_shentsize)
+        def sh(i):
+            o = e_shoff + i * e_shentsize
+            name, typ = struct.unpack_from(">II", blob, o)
+            off, size = struct.unpack_from(">QQ", blob, o + 0x18)
+            link, = struct.unpack_from(">I", blob, o + 0x28)
+            entsize, = struct.unpack_from(">Q", blob, o + 0x38)
+            return (name, typ, off, size, link, entsize)
+
+        def read_sym(o):
+            # Elf64_Sym: name(4), info(1), other(1), shndx(2), value(8), size(8)
+            st_name, st_info, _o, st_shndx = struct.unpack_from(">IBBH", blob, o)
+            return st_name, st_info, st_shndx
+    else:
+        (e_shoff,) = struct.unpack_from(">I", blob, 0x20)
+        e_shentsize, e_shnum, e_shstrndx = struct.unpack_from(">HHH", blob, 0x2E)
+
+        def sh(i):
+            n, typ, _fl, _ad, off, size, link, _inf, _al, es = \
+                struct.unpack_from(">IIIIIIIIII", blob, e_shoff + i * e_shentsize)
+            return (n, typ, off, size, link, es)
+
+        def read_sym(o):
+            # Elf32_Sym: name(4), value(4), size(4), info(1), other(1), shndx(2)
+            st_name, _v, _sz, st_info, _o, st_shndx = \
+                struct.unpack_from(">IIIBBH", blob, o)
+            return st_name, st_info, st_shndx
 
     symtab = None
     for i in range(e_shnum):
@@ -97,12 +127,11 @@ def read_undefined_symbols(blob):
             symtab = sh(i)
     if not symtab:
         return []
-    strtab = sh(symtab[6])
-    off, size, entsize, stroff = symtab[4], symtab[5], symtab[9], strtab[4]
+    strtab = sh(symtab[4])                             # sh_link -> strtab
+    off, size, entsize, stroff = symtab[2], symtab[3], symtab[5], strtab[2]
     out = []
     for k in range(size // entsize):
-        o = off + k * entsize
-        st_name, _v, _sz, st_info, _o, st_shndx = struct.unpack_from(">IIIBBH", blob, o)
+        st_name, st_info, st_shndx = read_sym(off + k * entsize)
         bind = st_info >> 4
         if st_shndx == 0 and st_name and bind != 0:    # SHN_UNDEF, global/weak
             end = blob.index(b"\0", stroff + st_name)
