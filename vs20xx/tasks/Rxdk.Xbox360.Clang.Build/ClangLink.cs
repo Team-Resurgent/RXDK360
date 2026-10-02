@@ -41,7 +41,7 @@ namespace Rxdk.Xbox360.Clang.Build
         /// <summary>Where the clang runtime archives (libc.a/libcpp.a) live.</summary>
         public string LibcDir { get; set; }
 
-        public string MsTriple { get; set; } = "powerpc-unknown-xbox360";
+        public string MsTriple { get; set; } = "powerpc64-unknown-xbox360";
         public string BaseAddress { get; set; } = "0x82000000";
 
         /// <summary>Extra libraries: bare name -&gt; CoffDir\name.a, or a full path/.a.</summary>
@@ -409,16 +409,31 @@ namespace Rxdk.Xbox360.Clang.Build
                 blob[2] != (byte)'L' || blob[3] != (byte)'F')
             { Log.LogError("import binding: not an ELF: {0}", elf); return null; }
 
-            int shoff = (int)Be32(blob, 0x20);
-            int shent = Be16(blob, 0x2E), shnum = Be16(blob, 0x30), shstrndx = Be16(blob, 0x32);
-            int Sh(int i, int f) => shoff + i * shent + f * 4;   // u32 field f of section i
+            // The ppc64 (ILP32-on-ppc64) toolchain emits ELFCLASS64 objects, so the
+            // linked image is an ELF64 executable; the pre-cutover ppc32 path produced
+            // ELF32. Read the structural fields (header, section table, symbol table)
+            // at the width the file's EI_CLASS dictates. Every address/offset in a
+            // 0x82000000 image still fits in 32 bits, so narrowing each (8-byte on
+            // ELF64) field to uint is safe; the import records patched below are 32-bit
+            // words of section content and are unaffected by the ELF class.
+            bool is64 = blob[4] == 2;   // EI_CLASS: 1 = ELFCLASS32, 2 = ELFCLASS64
+            uint BeN(int o, int n) { ulong v = 0; for (int k = 0; k < n; k++) v = (v << 8) | blob[o + k]; return (uint)v; }
+
+            int shoff = (int)BeN(is64 ? 0x28 : 0x20, is64 ? 8 : 4);
+            int shent = Be16(blob, is64 ? 0x3A : 0x2E);
+            int shnum = Be16(blob, is64 ? 0x3C : 0x30);
+            int shstrndx = Be16(blob, is64 ? 0x3E : 0x32);
+            // Section-header field byte offsets (ELF32 Shdr is 40 bytes, ELF64 64).
+            int oAddr = is64 ? 16 : 12, oOff = is64 ? 24 : 16, oSize = is64 ? 32 : 20;
+            int oLink = is64 ? 40 : 24, oEnt = is64 ? 56 : 36, wWide = is64 ? 8 : 4;
+            int Sh(int i) => shoff + i * shent;
             var secType = new uint[shnum]; var secAddr = new uint[shnum];
             var secOff = new uint[shnum]; var secSize = new uint[shnum]; var secName = new uint[shnum];
             for (int i = 0; i < shnum; i++)
             {
-                secName[i] = Be32(blob, Sh(i, 0)); secType[i] = Be32(blob, Sh(i, 1));
-                secAddr[i] = Be32(blob, Sh(i, 3)); secOff[i] = Be32(blob, Sh(i, 4));
-                secSize[i] = Be32(blob, Sh(i, 5));
+                secName[i] = BeN(Sh(i) + 0, 4); secType[i] = BeN(Sh(i) + 4, 4);
+                secAddr[i] = BeN(Sh(i) + oAddr, wWide); secOff[i] = BeN(Sh(i) + oOff, wWide);
+                secSize[i] = BeN(Sh(i) + oSize, wWide);
             }
             int shstrOff = (int)secOff[shstrndx];
             string CStr(int at) { int e = at; while (blob[e] != 0) e++; return Encoding.ASCII.GetString(blob, at, e - at); }
@@ -431,12 +446,17 @@ namespace Rxdk.Xbox360.Clang.Build
             int symIdx = -1;
             for (int i = 0; i < shnum; i++) if (secType[i] == 2) symIdx = i;   // SHT_SYMTAB
             if (symIdx < 0) return null;
-            int symOff = (int)secOff[symIdx], symSize = (int)secSize[symIdx], symEnt = (int)Be32(blob, Sh(symIdx, 9));
-            int strOff = (int)secOff[(int)Be32(blob, Sh(symIdx, 6))];   // sh_link -> strtab
+            int symOff = (int)secOff[symIdx], symSize = (int)secSize[symIdx];
+            int symEnt = (int)BeN(Sh(symIdx) + oEnt, wWide);
+            int strOff = (int)secOff[(int)BeN(Sh(symIdx) + oLink, 4)];   // sh_link -> strtab
+            // ELF32 Sym: name(4) value(4) size(4) info(1) other(1) shndx(2); the value
+            // sits right after the name. ELF64 Sym: name(4) info(1) other(1) shndx(2)
+            // value(8) size(8); the value is an 8-byte field at offset 8.
+            int oStValue = is64 ? 8 : 4, wStValue = is64 ? 8 : 4;
             var addr = new Dictionary<string, uint>(StringComparer.Ordinal);
             for (int o = symOff; o + symEnt <= symOff + symSize; o += symEnt)
             {
-                uint stName = Be32(blob, o), stValue = Be32(blob, o + 4);
+                uint stName = BeN(o, 4), stValue = BeN(o + oStValue, wStValue);
                 if (stName != 0 && stValue != 0) addr[CStr(strOff + (int)stName)] = stValue;
             }
 

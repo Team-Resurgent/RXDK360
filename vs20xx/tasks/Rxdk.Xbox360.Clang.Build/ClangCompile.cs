@@ -38,7 +38,7 @@ namespace Rxdk.Xbox360.Clang.Build
 
         [Required] public ITaskItem[] Sources { get; set; }
 
-        public string MsTriple { get; set; } = "powerpc-unknown-xbox360";
+        public string MsTriple { get; set; } = "powerpc64-unknown-xbox360";
         public string Optimization { get; set; } = "-O2";
         /// <summary>Link-time optimisation (Release_LTCG): compile to LLVM bitcode with
         /// -flto so ld.lld optimises across the whole program at link time.</summary>
