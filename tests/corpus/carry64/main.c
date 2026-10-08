@@ -1,11 +1,14 @@
 #include "rt.h"
-/* XER[CA] width. Titles run in 64-bit mode (MSR[SF]=1), where the PowerPC
-   architecture sets CA from the carry out of the full 64-bit operation. xenia
-   computes it from the low 32 bits (ppc_emit_alu.cc AddDidCarry/SubDidCarry),
-   which breaks compiled 64-bit compare-and-select sequences -- e.g. the
-   runtime's FILETIME -> Unix time conversion (subfc/addze) returned 0. The
-   first two cases differ between 32- and 64-bit carry; the last two agree.
-   expected.txt holds the 64-bit-mode answer. */
+/* XER[CA] width for 64-bit operands. A devkit run (2026-10-08) shows titles
+   get the carry out of the low 32 bits, as in the PowerPC 32-bit computation
+   mode (MSR[SF]=0), even though the registers and 64-bit instructions are
+   full width; xenia does the same (ppc_emit_alu.cc AddDidCarry/SubDidCarry).
+   Code that needs the carry out of a 64-bit add or subtract -- clang's i64
+   addc/adde/subfc/subfe/addze sequences, e.g. 128-bit arithmetic in picolibc's
+   Ryu, or the runtime's FILETIME -> Unix time conversion -- therefore gets the
+   wrong answer on the console, and the compiler must not emit it for the
+   Xbox 360. The first two cases differ between 32- and 64-bit carry; the
+   last two agree. expected.txt holds the console's answer. */
 
 /* Each operand is loaded with ld so it occupies a full 64-bit register (this
    is an ILP32 target: a long long C operand would be a 32-bit register pair). */

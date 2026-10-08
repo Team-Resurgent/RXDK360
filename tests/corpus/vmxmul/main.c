@@ -1,11 +1,13 @@
 #include "rt.h"
 /* VMX halfword multiplies. clang lowers a 4 x 32-bit vector multiply (which its
-   loop vectorizer produces from ordinary integer code) to vmulouh + vmsumuhm,
-   the AltiVec idiom for targets without vmuluwm. xenia does not implement
-   either (break_on_unimplemented_instructions stops the title), so this
-   checks what the console does with them. Each line runs one instruction; a
-   missing line means the instruction before it faulted. expected.txt holds
-   the AltiVec-defined results. */
+   loop vectorizer produces from ordinary integer loops) to vmulouh + vmsumuhm,
+   the AltiVec idiom for targets without vmuluwm. A devkit run (2026-10-08)
+   printed "try vmulouh" and then raised STATUS_ILLEGAL_INSTRUCTION
+   (0xC000001D) on it: Xenon's VMX does not implement it, so the compiler must
+   not emit these for the Xbox 360 (xenia does not implement them either and
+   stops the title). Each instruction is announced before it runs, so the last
+   "try" line shows which one faulted. expected.txt holds the AltiVec-defined
+   results. */
 
 typedef unsigned int v4u __attribute__((vector_size(16)));
 
@@ -23,6 +25,7 @@ void t_vmxmul(void)
     v4u r;
     volatile v4u va = a, vb = b;
 
+    DbgPrint("try vmulouh\n");
     __asm__ __volatile__("lvx 0, 0, %1\n\t"
                          "lvx 1, 0, %2\n\t"
                          "vmulouh 2, 0, 1\n\t"
@@ -32,6 +35,7 @@ void t_vmxmul(void)
                          : "v0", "v1", "v2", "memory");
     show("vmulouh", r);
 
+    DbgPrint("try vmuleuh\n");
     __asm__ __volatile__("lvx 0, 0, %1\n\t"
                          "lvx 1, 0, %2\n\t"
                          "vmuleuh 2, 0, 1\n\t"
@@ -41,6 +45,7 @@ void t_vmxmul(void)
                          : "v0", "v1", "v2", "memory");
     show("vmuleuh", r);
 
+    DbgPrint("try vmsumuhm\n");
     __asm__ __volatile__("lvx 0, 0, %1\n\t"
                          "lvx 1, 0, %2\n\t"
                          "lvx 3, 0, %3\n\t"
@@ -52,5 +57,6 @@ void t_vmxmul(void)
     show("vmsumuhm", r);
 
     /* What the compiler emits for a plain vector multiply. */
+    DbgPrint("try v4i32 mul\n");
     show("v4i32 mul", va * vb);
 }
