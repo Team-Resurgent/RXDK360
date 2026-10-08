@@ -6,9 +6,12 @@
 #include <stacktrace>
 #include <string>
 
-__attribute__((noinline)) static std::stacktrace level_c() { return std::stacktrace::current(); }
-__attribute__((noinline)) static std::stacktrace level_b() { return level_c(); }
-__attribute__((noinline)) static std::stacktrace level_a() { return level_b(); }
+/* Each level must keep its own frame: optimized, `return level_x();` otherwise
+   becomes a tail call and the frame never exists to be captured. */
+#define LEVEL __attribute__((noinline, disable_tail_calls)) static
+LEVEL std::stacktrace level_c() { return std::stacktrace::current(); }
+LEVEL std::stacktrace level_b() { return level_c(); }
+LEVEL std::stacktrace level_a() { return level_b(); }
 
 int main() {
     std::stacktrace st = level_a();
