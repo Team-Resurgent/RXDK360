@@ -166,8 +166,12 @@ _Noreturn void exit(int code) {
     for (;;) {}
 }
 
+/* tzinit.c: install the console's time zone as the default TZ. */
+extern void xbox_init_timezone(void);
+
 void _start(void) {
     init_process_heap();              /* before init: C++/CRT ctors may allocate */
+    xbox_init_timezone();             /* after the heap (setenv), before ctors that may call localtime */
     run_init();
     int argc = build_args();
     exit(main(argc, g_argv));         /* g_argv is always NULL-terminated */

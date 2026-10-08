@@ -145,6 +145,7 @@ XBOX_GLUE = [
     os.path.join(ROOT, "runtime", "xbox", "pthread.c"),            # POSIX threads over the C11 thread/mutex/cond primitives
     os.path.join(ROOT, "runtime", "xbox", "aio.c"),               # POSIX async I/O, implemented synchronously
     os.path.join(ROOT, "runtime", "xbox", "crt_start.c"),          # standard main() CRT startup (_start)
+    os.path.join(ROOT, "runtime", "xbox", "tzinit.c"),             # default TZ from the console's time zone (GetTimeZoneInformation)
     os.path.join(ROOT, "runtime", "xbox", "clock.c"),              # clock_gettime over KeQuerySystemTime (for <chrono>)
     os.path.join(ROOT, "runtime", "xbox", "sysconf.c"),            # sysconf(_SC_NPROCESSORS_ONLN)=6 -> std::thread::hardware_concurrency
     os.path.join(ROOT, "runtime", "xbox", "c23_alloc.c"),          # C23 free_sized/free_aligned_sized
