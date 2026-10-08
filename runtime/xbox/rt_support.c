@@ -200,10 +200,10 @@ int __C2_11886 = 0;
 
 extern void HalReturnToFirmware(unsigned);
 
-/* No process to signal on the console: a fatal fault powers the box off, the
-   same end state a real title reaches. */
+/* No process to signal on the console: abort reboots the console, as exit()
+   does (routine 0 would power a devkit off). */
 void abort(void) {
-    HalReturnToFirmware(0);
+    HalReturnToFirmware(2);
     for (;;) {}
 }
 

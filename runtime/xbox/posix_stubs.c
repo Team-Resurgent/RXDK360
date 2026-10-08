@@ -40,7 +40,7 @@ int   pause(void)                            { errno = ENOSYS; return -1; } /* n
 extern void HalReturnToFirmware(unsigned int);
 _Noreturn void _exit(int status) {
     (void)status;
-    HalReturnToFirmware(0);
+    HalReturnToFirmware(2); /* reboot, as exit() does */
     for (;;) {}
 }
 

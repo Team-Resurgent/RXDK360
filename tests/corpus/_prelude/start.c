@@ -34,7 +34,9 @@ extern void *RtlCreateHeap(unsigned flags, void *base, unsigned long reserve,
                            unsigned long commit, void *lock, void *params);
 
 /* Shared entry: run static ctors, then the program's title_main, print a
-   completion sentinel, then power off cleanly. The sentinel is the last line the
+   completion sentinel, then reboot the console (HalReturnToFirmware routine 2;
+   xenia exits on any routine, and routine 0 powers a devkit off, so the next
+   hardware run cannot reach it). The sentinel is the last line the
    harness expects, so a dropped trailing line (xenia's async logger can lose the
    last line on a fast exit) costs the sentinel, not the program's real output;
    the harness also retries a run whose sentinel never arrived. */
@@ -44,6 +46,6 @@ void _start(void) {
     run_init_array();
     title_main();
     DbgPrint("##RXDK-CORPUS-END##\n");
-    HalReturnToFirmware(0);
+    HalReturnToFirmware(2);
     for (;;) {}
 }

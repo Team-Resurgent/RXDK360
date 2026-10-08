@@ -11,7 +11,7 @@
  * before main -- so both first-party and prebuilt-MS pre-main init run the way a
  * console title expects -- calls main, then runs the destructors (.fini_array,
  * e.g. the stdio flush), traces main's return value the way the console's xapi
- * startup does, and powers off.
+ * startup does, and reboots the console.
  *
  * This lives in libc.a as its own object, so it is pulled in only when the title
  * has not supplied its own _start (e.g. the corpus driver, which uses its own
@@ -153,7 +153,9 @@ static void run_fini(void) {
 }
 
 /* C standard exit(): run the atexit/static-dtor + .fini_array teardown, trace the
-   status the way the console's xapi startup does, and power off. Callable from any
+   status the way the console's xapi startup does, and reboot the console
+   (HalReturnToFirmware routine 2; routine 0 powers a devkit off, leaving it
+   unreachable until someone presses the power button). Callable from any
    depth (unlike returning from main). _start routes through it so the normal-return
    and explicit-exit paths are identical. picolibc's exit.c is excluded from the
    build in favour of this one (it drives our __rxdk_run_atexit, not picolibc's
@@ -162,7 +164,7 @@ _Noreturn void exit(int code) {
     __rxdk_run_atexit();  /* C++ static-object dtors + atexit, reverse order */
     run_fini();           /* .fini_array (e.g. the stdio flush), runs last */
     DbgPrint("[XAPI RETURN VALUE] %d\n", code);
-    HalReturnToFirmware(0);
+    HalReturnToFirmware(2);
     for (;;) {}
 }
 
