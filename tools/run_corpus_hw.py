@@ -10,7 +10,7 @@ kit. It reuses run_corpus.py's build, section-split and diff so the two backends
 stay in lock-step -- only deploy/launch/capture differ.
 
 Deploy + launch + capture go through the RxdkXbdm CLI
-(vs20xx/debugger/.../RxdkXbdm.exe) `debuglaunch <console> <xex> <bp>`: it
+(vs20xx/debugger/Rxdk.Xbox360.Xbdm, built as Rxdk.Xbox360.Xbdm.exe) `debuglaunch <console> <xex> <bp>`: it
 deploys the XEX, reboots the kit into it stopped at entry, then continues with a
 debugger attached and streams notifications until its wait window ends. The
 debugger MUST stay attached: a real kit routes a title's DbgPrint over XBDM only
@@ -48,10 +48,10 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 import run_corpus as rc  # noqa: E402  (shared build / split / constants)
 
-# RxdkXbdm.exe: the managed XBDM CLI (deploy/launch/watch). Override with RXDK_XBDM.
+# Rxdk.Xbox360.Xbdm.exe: the managed XBDM CLI (deploy/launch/watch). Override with RXDK_XBDM.
 XBDM = os.environ.get("RXDK_XBDM", os.path.join(
-    ROOT, "vs20xx", "debugger", "Rxdk.Xbox360.DebugAdapter", "bin", "Release",
-    "net10.0-windows", "RxdkXbdm.exe"))
+    ROOT, "vs20xx", "debugger", "Rxdk.Xbox360.Xbdm", "bin", "Release",
+    "net10.0-windows", "win-x86", "Rxdk.Xbox360.Xbdm.exe"))
 CONSOLE = os.environ.get("RXDK_CONSOLE", "")     # empty -> RxdkXbdm's DefaultConsole
 HANG_TIMEOUT = int(os.environ.get("RXDK_HW_TIMEOUT", "90"))   # seconds per sample
 
