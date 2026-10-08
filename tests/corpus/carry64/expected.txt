@@ -1,0 +1,4 @@
+subfc 0x100000000-1 CA=1
+addc 0xffffffff+1 CA=0
+subfc 2-1 CA=1
+addc ~0+1 CA=1
