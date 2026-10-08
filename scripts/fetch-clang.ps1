@@ -47,5 +47,8 @@ foreach ($p in @("bin\clang.exe", "bin\ld.lld.exe", "bin\llvm-ar.exe", "libcxx\i
     if (-not (Test-Path $full)) { throw "clang zip missing $p" }
 }
 
+# Point libc++'s ctype_base at picolibc's __CTYPE_* names (see the script).
+& (Join-Path $PSScriptRoot "patch-libcxx-ctype.ps1") -LlvmRoot $dest
+
 Write-Host "clang -> $dest"
 & (Join-Path $dest "bin\clang.exe") --version
