@@ -175,11 +175,11 @@ EXCLUDE = set([
     "conv_flt.c", "ultoa_invert.c",
     "vfprintf_char.c", "vfprintf_float.c", "vfprintf_int.c",
     "vfprintf_n.c", "vfprintf_str.c",
-    # the Ryu float<->string engines duplicate the classic dtoa/ftoa engines
-    # (which back the double printf variant), so keep only the classic ones.
-    "ftoa_ryu.c", "dtoa_ryu.c", "atod_ryu.c", "atof_ryu.c",
-    "ryu_divpow2.c", "ryu_log10.c", "ryu_log2pow5.c", "ryu_pow5bits.c",
-    "ryu_table.c", "ryu_umul128.c",
+    # The classic dtoa/ftoa/atod/atof engines are picolibc's approximate
+    # alternative to its default Ryu code: they print only ~17 significant
+    # digits and do not round decimal input correctly. Build the exact Ryu
+    # versions (same function names), as picolibc does by default.
+    "ftoa_engine.c", "dtoa_engine.c", "atod_engine.c", "atof_engine.c",
     # replaced by runtime/xbox/ms_printf.c, which translates the MSVC format
     # (%S/%C/%I64 ...) before formatting over the same vfprintf engine.
     "sprintf.c", "snprintf.c", "swprintf.c", "vsnprintf.c",

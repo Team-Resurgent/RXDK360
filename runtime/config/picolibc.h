@@ -14,10 +14,15 @@
    multibyte encoding, which is the behaviour Xbox paths and gamertags want. */
 #define __IO_WCHAR 1
 /* Default printf/scanf I/O variant = double ('d'): float formatting/parsing for
-   printf, scanf, and iostream num_put/num_get. Backed by the Ryu engines
-   (dtoa_ryu.c etc., compiled in libs/libc/build.zig). Was 0 (no float ->
-   picolibc emitted the "*float*" placeholder for %f/%g). */
+   printf, scanf, and iostream num_put/num_get. Was 0 (no float -> picolibc
+   emitted the "*float*" placeholder for %f/%g). */
 #define __IO_DEFAULT 'd'
+/* Exact binary <-> decimal conversion: tools/build_libc.py builds the Ryu
+   sources (dtoa_ryu.c etc.), not the approximate *_engine.c ones. */
+#define __IO_FLOAT_EXACT 1
+/* printf produces every requested significant digit of a double exactly
+   (dtoa_big.c), as glibc and MSVC do, rather than zero-filling past 17. */
+#define __IO_FLOAT_ALL_DIGITS 1
 #define __NEWLIB_VERSION "4.3.0"
 #define _NEWLIB_VERSION "4.3.0"
 #define _PICOLIBC_MINOR__ 8
