@@ -6,12 +6,17 @@
 //   Rxdk.Xbox360.Xbdm info                              locate bin\win32\xbdm.dll + $(DefaultConsole)
 //   Rxdk.Xbox360.Xbdm threads [console]                 connect and list modules + threads
 //   Rxdk.Xbox360.Xbdm debuglaunch [console] <xex> [bp]  deploy + stop at entry; optional execute BP (VA or RVA)
+//       --skip-faults: while waiting for the BP, step a faulting thread past the faulting
+//       instruction and put the exception code in its r0 (instruction probes; see
+//       tests/corpus/vmxops)
 //   Rxdk.Xbox360.Xbdm run         [console] <xex>       deploy + reboot title (no debugger)
 //   Rxdk.Xbox360.Xbdm watch       [console]             print XBDM notifications (watch an official F5)
 //   Rxdk.Xbox360.Xbdm screenshot  [console] [file.bmp]  capture the kit front buffer via DmScreenShot
 //   Rxdk.Xbox360.Xbdm deploy  <console> <file> <remote> send a file to the console
 //   Rxdk.Xbox360.Xbdm launch  <console> <imagePath>     reboot the console into a title (stopped)
 //   Rxdk.Xbox360.Xbdm mem     <console> <hexAddr> <len> read memory
+//   Rxdk.Xbox360.Xbdm reboot  [console]             cold-reboot the console (recovers a title
+//                                                     stuck on an exception)
 //
 // Console defaults to HKCU\SOFTWARE\Microsoft\XenonSDK\XboxName ($(DefaultConsole)).
 //
@@ -25,7 +30,7 @@ using System.Text;
 using System.Threading;
 using Rxdk.Xbox360.Xbdm;
 
-if (args.Length < 1) { Console.Error.WriteLine("usage: Rxdk.Xbox360.Xbdm <info|threads|debuglaunch|run|halt|go|unbreak|watch|screenshot|deploy|launch|mem> ..."); return 1; }
+if (args.Length < 1) { Console.Error.WriteLine("usage: Rxdk.Xbox360.Xbdm <info|threads|debuglaunch|run|halt|go|unbreak|watch|screenshot|deploy|launch|mem|reboot> ..."); return 1; }
 
 string ConsoleName(int i)
 {
@@ -88,9 +93,11 @@ try
             bool debug = args[0] == "debuglaunch";
             string? kit = null, image = null;
             uint? sourceBp = null;
+            bool skipFaults = false;
             for (int i = 1; i < args.Length; i++)
             {
-                if (LooksLikeHex(args[i])) sourceBp = ParseHex(args[i]);
+                if (args[i] == "--skip-faults") skipFaults = true;
+                else if (LooksLikeHex(args[i])) sourceBp = ParseHex(args[i]);
                 else if (IsImagePath(args[i])) image = args[i];
                 else kit = args[i];
             }
@@ -129,8 +136,16 @@ try
                     c.SetBreakpoint(kitBp);
                     c.ContinueAll();
                     Console.WriteLine("auto-continued past initial break; waiting for source BP");
-                    if (c.WaitFor(n => n.Kind is "break" or "singlestep" or "exception" &&
-                                       n.Addr is uint a && a == kitBp, TimeSpan.FromSeconds(30), out var hit))
+                    if (c.WaitFor(n =>
+                        {
+                            if (skipFaults && n.Kind == "exception" && n.Thread is uint ft)
+                            {
+                                SkipFault(c, ft, n);
+                                return false;
+                            }
+                            return n.Kind is "break" or "singlestep" or "exception" &&
+                                   n.Addr is uint a && a == kitBp;
+                        }, skipFaults ? TimeSpan.FromMinutes(10) : TimeSpan.FromSeconds(30), out var hit))
                         Console.WriteLine($"source BP hit: {hit}");
                     else
                         Console.WriteLine("timed out waiting for source BP");
@@ -156,6 +171,15 @@ try
                 c.LaunchTitle(remote, stopAtLoad: false);
                 Console.WriteLine($"running {remote}");
             }
+            break;
+        }
+        case "reboot":
+        {
+            string kit = ConsoleName(1);
+            using var c = new XbdmClient();
+            c.Connect(kit);
+            c.Reboot(DmBoot.Cold);
+            Console.WriteLine($"rebooted {kit}");
             break;
         }
         case "halt":
@@ -339,4 +363,29 @@ static (string dir, string name) SplitXboxPath(string remote)
     int i = remote.LastIndexOf('\\');
     if (i < 0) return ("devkit:\\", remote);
     return (remote[..(i + 1)], remote[(i + 1)..]);
+}
+
+// --skip-faults: an instruction probe executes candidate instructions with r0
+// cleared and reads r0 back afterwards. A faulting instruction stops its thread
+// with the debugger attached; step past it (4 bytes: every PowerPC
+// instruction) and hand the exception code back in r0, then continue the thread
+// with the exception handled and resume the title. XBDM reports each exception twice, so a
+// notification whose thread is no longer at the faulting address has already
+// been handled and is ignored (stepping again would skip the instruction that
+// reads r0).
+static void SkipFault(XbdmClient c, uint tid, XbdmNotification n)
+{
+    uint code = n.Fields.TryGetValue("code", out var cs)
+        ? Convert.ToUInt32(cs.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? cs[2..] : cs, 16)
+        : 0xFFFFFFFFu;
+    var ctx = c.GetContext(tid);
+    uint at = ctx.Iar;
+    if (n.Addr is uint faultAt && at != faultAt)
+        return;
+    ctx.Iar += 4;
+    ctx.Gpr[0] = code;
+    c.SetContext(tid, ref ctx);
+    c.ContinueThread(tid, handleException: true);
+    c.Go(); // the exception stopped the whole title, not just this thread
+    Console.WriteLine($"skipped fault code=0x{code:X8} at 0x{at:X8} thread=0x{tid:X8}");
 }

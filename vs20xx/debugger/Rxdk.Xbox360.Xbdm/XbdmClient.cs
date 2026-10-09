@@ -556,8 +556,9 @@ namespace Rxdk.Xbox360.Xbdm
                 {
                     LaunchTitle(remote, stopAtLoad: true, cold: false);
                 }
-                catch (XbdmException)
+                catch (XbdmException ex)
                 {
+                    Console.Error.WriteLine($"launch: {ex.Message} -- reconnecting");
                     try
                     {
                         SettleConnection();
@@ -568,6 +569,7 @@ namespace Rxdk.Xbox360.Xbdm
                 }
 
                 var deadline = DateTime.UtcNow + wait;
+                var nextPoll = DateTime.UtcNow + TimeSpan.FromSeconds(5);
                 XbdmNotification? last = null;
                 while (DateTime.UtcNow < deadline)
                 {
@@ -575,6 +577,17 @@ namespace Rxdk.Xbox360.Xbdm
                     {
                         if (WaitFor(n => IsEntryStop(n) || n.Kind is "exec" or "modload", TimeSpan.FromMilliseconds(400), out var n))
                             last = n;
+
+                        // The entry break's notification is sometimes not delivered (seen
+                        // right after the kit rebooted from the previous title): the title
+                        // is loaded and its loader thread sits at the break, but no event
+                        // arrives. Poll for that state as well.
+                        if ((last == null || !IsEntryStop(last)) && DateTime.UtcNow >= nextPoll)
+                        {
+                            nextPoll = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+                            if (TryLoadedTitleStopped(titleBase, out var polled))
+                                last = polled;
+                        }
 
                         if (last != null && IsEntryStop(last))
                         {
@@ -766,6 +779,25 @@ namespace Rxdk.Xbox360.Xbdm
             }
             catch { }
             return false;
+        }
+
+        /// <summary>The title module is loaded and a thread is stopped: the entry break
+        /// (the loader thread stops there, in kernel code).</summary>
+        private bool TryLoadedTitleStopped(string titleBase, out XbdmNotification hit)
+        {
+            hit = null!;
+            try
+            {
+                bool loaded = false;
+                foreach (var m in WalkLoadedModules())
+                    if (!string.IsNullOrEmpty(m.Name) &&
+                        m.Name.IndexOf(titleBase, StringComparison.OrdinalIgnoreCase) >= 0)
+                    { loaded = true; break; }
+                if (!loaded || !TrySnapshotStopped(out hit)) return false;
+                hit.Raw = $"{titleBase} loaded, thread {hit.Fields["thread"]} stopped (polled)";
+                return true;
+            }
+            catch { return false; }
         }
 
         private bool TryTitleStop(string titleBase, out XbdmNotification hit)

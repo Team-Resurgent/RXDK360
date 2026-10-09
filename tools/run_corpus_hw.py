@@ -63,6 +63,43 @@ def is_isolated(srcdir):
     return os.path.exists(os.path.join(srcdir, "hw-isolate"))
 
 
+def skips_faults(srcdir):
+    """An instruction probe (e.g. tests/corpus/vmxops) carries `hw-skip-faults`:
+    the debugger steps a faulting thread past the faulting instruction and
+    reports the exception code in r0, so one run can probe many instructions."""
+    return os.path.exists(os.path.join(srcdir, "hw-skip-faults"))
+
+
+def wait_for_kit(timeout=240):
+    """Wait until the kit has booted to the dashboard (xshell.xex loaded). A
+    title exits by rebooting the console (HalReturnToFirmware(2)), and a launch
+    issued before the dashboard is up never reaches the title's entry break."""
+    cmd = [XBDM, "threads"] + ([CONSOLE] if CONSOLE else [])
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            out = subprocess.run(cmd, capture_output=True, text=True, timeout=20).stdout
+        except subprocess.TimeoutExpired:
+            out = ""
+        if "module xshell.xex" in out:
+            return True
+        time.sleep(5)
+    return False
+
+
+def cold_reboot():
+    """Cold-reboot the kit. Used when a launch never reached the title's entry
+    break -- e.g. the previous title is still stopped on an exception with the
+    debugger attached, which the launch's title reboot does not recover."""
+    cmd = [XBDM, "reboot"] + ([CONSOLE] if CONSOLE else [])
+    try:
+        subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    except subprocess.TimeoutExpired:
+        pass
+    time.sleep(10)
+    return wait_for_kit()
+
+
 def _hold_bp(xex):
     """A breakpoint address the title never executes -- its PE-header page, which
     is read-only data, not code. Planting it makes debuglaunch stay attached
@@ -76,12 +113,18 @@ def _hold_bp(xex):
     return "0x%08X" % (base + 0x40)                              # inside the DOS/PE header
 
 
-def launch_and_capture(xex, timeout):
+def launch_and_capture(xex, timeout, skip_faults=False):
     """Deploy + reboot into `xex` stopped at entry, continue with the debugger
     attached, and stream the title's DbgPrint until the sentinel or `timeout`.
-    Returns (lines, complete). One RxdkXbdm connection, so no run/watch race."""
-    lines, complete = [], False
+    Returns (lines, complete, started): started is False when the title never
+    reached its entry break. One RxdkXbdm connection, so no run/watch race."""
+    lines, complete, started = [], False, False
     cmd = [XBDM, "debuglaunch"] + ([CONSOLE] if CONSOLE else []) + [xex, _hold_bp(xex)]
+    if skip_faults:
+        cmd.append("--skip-faults")
+    if not wait_for_kit():
+        print("  kit did not reach the dashboard -- cold-rebooting it")
+        cold_reboot()
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     deadline = time.time() + timeout
     try:
@@ -91,6 +134,8 @@ def launch_and_capture(xex, timeout):
                 if proc.poll() is not None:
                     break
                 continue
+            if ln.startswith("initial break:"):
+                started = True
             m = DEBUGSTR_RE.search(ln)
             if not m:
                 continue
@@ -102,7 +147,7 @@ def launch_and_capture(xex, timeout):
     finally:
         if proc.poll() is None:
             proc.terminate()
-    return lines, complete
+    return lines, complete, started
 
 
 def build_sample(runnable, out_name):
@@ -126,7 +171,12 @@ def run_sample(runnable, out_name, rows):
             rows.append((n, "BUILD-FAIL", [err]))
         return False
     names = [n for n, _, _ in runnable]
-    actual, complete = launch_and_capture(xex, HANG_TIMEOUT)
+    skip = any(skips_faults(d) for _, d, _ in runnable)
+    actual, complete, started = launch_and_capture(xex, HANG_TIMEOUT, skip_faults=skip)
+    if not started:
+        print("  title never reached its entry break -- cold-rebooting the kit and retrying once")
+        cold_reboot()
+        actual, complete, started = launch_and_capture(xex, HANG_TIMEOUT, skip_faults=skip)
     sections = rc.split_sections(actual, names)
     for name, srcdir, _ in runnable:
         exp_path = os.path.join(srcdir, "expected.txt")
@@ -185,6 +235,9 @@ def main():
         print("== isolated: %s (hang-prone) ==" % n)
         complete = run_sample([(n, d, s)], "corpus_hw_%s.xex" % n, rows)
         if not complete:
+            if not sys.stdin.isatty():
+                print("  kit may be wedged (non-interactive: skipping remaining isolated tests)")
+                break
             try:
                 input("  kit may be wedged -- power-cycle it, wait for it to boot, "
                       "then press Enter to continue... ")

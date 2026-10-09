@@ -15,6 +15,11 @@ A test with a `pending` file is known-blocked on the current runtime (e.g. it
 needs the modern libc); it is left out of the combined sample and reported
 PENDING (build-checked on its own so a newly-linkable one is surfaced).
 
+A test with an `hw-only` file probes the console itself (e.g. which VMX
+instructions Xenon implements) and is meaningful only on a devkit: xenia stops
+the title on an instruction it does not implement. It is left out here and
+run by tools/run_corpus_hw.py.
+
   python tools/run_corpus.py                 # run + report
   python tools/run_corpus.py --bless         # (re)write each expected.txt
   python tools/run_corpus.py --only hello,vcall
@@ -145,7 +150,8 @@ def main():
     only = set(n for n in args.only.split(",") if n)
     libs = [n for n in args.lib.split(",") if n]
 
-    tests = list(find_tests(only))
+    tests = [t for t in find_tests(only)
+             if not os.path.exists(os.path.join(t[1], "hw-only"))]
     runnable = [(n, d, s) for n, d, s, p in tests if not p]
     pending = [(n, d, s) for n, d, s, p in tests if p]
 
