@@ -1,0 +1,3 @@
+Probes Xenon itself: its answers come from the console and may differ from xenia,
+and a load through a high-bit address may fault on xenia. Run on a
+devkit with tools/run_corpus_hw.py; tools/run_corpus.py (xenia) leaves it out.

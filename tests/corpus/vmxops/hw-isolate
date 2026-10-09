@@ -1,0 +1,4 @@
+Runs instructions that may fault. If the debugger cannot step past a fault,
+the title holds the attached debugger until the kit is rebooted, so the HW
+corpus runner (tools/run_corpus_hw.py) runs it in an isolated pass AFTER the
+main sample.

@@ -1,0 +1,3 @@
+Probes Xenon itself: several AltiVec instructions are illegal on the console,
+and xenia stops the title on instructions it does not implement. Run on a
+devkit with tools/run_corpus_hw.py; tools/run_corpus.py (xenia) leaves it out.

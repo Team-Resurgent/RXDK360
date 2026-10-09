@@ -1,0 +1,3 @@
+Instruction probe: the debugger steps past a faulting instruction and reports
+the exception code in r0 (tools/run_corpus_hw.py passes --skip-faults to
+debuglaunch for a test carrying this marker).

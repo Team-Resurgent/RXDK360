@@ -1,8 +1,2 @@
-try vmulouh
-vmulouh 00000015 0000002d 0000ffff 4b4d2080
-try vmuleuh
-vmuleuh 0000000c 00000020 0001fffe 0b00a630
-try vmsumuhm
-vmsumuhm 00000022 0000004f 00030000 564dc6b4
-try v4i32 mul
 v4i32 mul 00200015 004c002d 0003ffff 242d2080
+vectorized dot 04bc6360

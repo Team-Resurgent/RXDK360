@@ -1,0 +1,9 @@
+or. 0x1_00000000 CR0=EQ
+or. 0x0_80000000 CR0=LT
+cmpdi 0x1_00000000,0 CR0=GT
+cmpdi 0x0_80000000,0 CR0=GT
+sradi 0x0_80000001,1 CA=0
+sradi 0xffffffff_00000001,1 CA=1
+bdnz ctr=0x1_00000001 taken=0
+addo 0x7fffffff+1 OV=1
+lwz via high-bit address loaded 0x1234abcd

@@ -1,6 +1,5 @@
-Probe for VMX instructions Xenon may not implement. On a devkit (2026-10-08)
-vmulouh raised STATUS_ILLEGAL_INSTRUCTION (0xC000001D) with the debugger
-attached, leaving the title stuck on the exception until the kit is rebooted.
-The HW corpus runner (tools/run_corpus_hw.py) runs tests carrying this marker
-in an isolated pass AFTER the main sample, so this costs only this test, not
-the whole run.
+Until the compiler stops emitting VMX integer multiplies for the Xbox 360,
+this title raises STATUS_ILLEGAL_INSTRUCTION on the console and holds the
+attached debugger until the kit is rebooted. The HW corpus runner
+(tools/run_corpus_hw.py) runs tests carrying this marker in an isolated pass
+AFTER the main sample, so this costs only this test, not the whole run.

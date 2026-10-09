@@ -1,0 +1,175 @@
+vaddubm ok
+vadduhm ok
+vadduwm ok
+vaddcuw ok
+vaddubs ok
+vadduhs ok
+vadduws ok
+vaddsbs ok
+vaddshs ok
+vaddsws ok
+vsububm ok
+vsubuhm ok
+vsubuwm ok
+vsubcuw ok
+vsububs ok
+vsubuhs ok
+vsubuws ok
+vsubsbs ok
+vsubshs ok
+vsubsws ok
+vmaxub ok
+vmaxuh ok
+vmaxuw ok
+vmaxsb ok
+vmaxsh ok
+vmaxsw ok
+vminub ok
+vminuh ok
+vminuw ok
+vminsb ok
+vminsh ok
+vminsw ok
+vavgub ok
+vavguh ok
+vavguw ok
+vavgsb ok
+vavgsh ok
+vavgsw ok
+vmuleub fault 0xc000001d
+vmulesb fault 0xc000001d
+vmuleuh fault 0xc000001d
+vmulesh fault 0xc000001d
+vmuloub fault 0xc000001d
+vmulosb fault 0xc000001d
+vmulouh fault 0xc000001d
+vmulosh fault 0xc000001d
+vmhaddshs fault 0xc000001d
+vmhraddshs fault 0xc000001d
+vmladduhm fault 0xc000001d
+vmsumubm fault 0xc000001d
+vmsummbm fault 0xc000001d
+vmsumuhm fault 0xc000001d
+vmsumuhs fault 0xc000001d
+vmsumshm fault 0xc000001d
+vmsumshs fault 0xc000001d
+vsum4ubs fault 0xc000001d
+vsum4sbs fault 0xc000001d
+vsum4shs fault 0xc000001d
+vsum2sws fault 0xc000001d
+vsumsws fault 0xc000001d
+vand ok
+vandc ok
+vor ok
+vnor ok
+vxor ok
+vsel ok
+vrlb ok
+vrlh ok
+vrlw ok
+vslb ok
+vslh ok
+vslw ok
+vsrb ok
+vsrh ok
+vsrw ok
+vsrab ok
+vsrah ok
+vsraw ok
+vsl ok
+vsr ok
+vslo ok
+vsro ok
+vcmpequb ok
+vcmpequh ok
+vcmpequw ok
+vcmpgtub ok
+vcmpgtuh ok
+vcmpgtuw ok
+vcmpgtsb ok
+vcmpgtsh ok
+vcmpgtsw ok
+vcmpequb. ok
+vcmpequh. ok
+vcmpequw. ok
+vcmpgtub. ok
+vcmpgtuh. ok
+vcmpgtuw. ok
+vcmpgtsb. ok
+vcmpgtsh. ok
+vcmpgtsw. ok
+vaddfp ok
+vsubfp ok
+vmaxfp ok
+vminfp ok
+vmaddfp ok
+vnmsubfp ok
+vrefp ok
+vrsqrtefp ok
+vexptefp ok
+vlogefp ok
+vrfin ok
+vrfiz ok
+vrfip ok
+vrfim ok
+vcfux ok
+vcfsx ok
+vctuxs ok
+vctsxs ok
+vcmpeqfp ok
+vcmpgefp ok
+vcmpgtfp ok
+vcmpbfp ok
+vcmpeqfp. ok
+vcmpgefp. ok
+vcmpgtfp. ok
+vcmpbfp. ok
+vmrghb ok
+vmrghh ok
+vmrghw ok
+vmrglb ok
+vmrglh ok
+vmrglw ok
+vpkuhum ok
+vpkuwum ok
+vpkuhus ok
+vpkuwus ok
+vpkshus ok
+vpkswus ok
+vpkshss ok
+vpkswss ok
+vpkpx ok
+vupkhsb ok
+vupkhsh ok
+vupklsb ok
+vupklsh ok
+vupkhpx ok
+vupklpx ok
+vspltb ok
+vsplth ok
+vspltw ok
+vspltisb ok
+vspltish ok
+vspltisw ok
+vperm ok
+vsldoi ok
+mfvscr ok
+mtvscr ok
+lvx ok
+lvxl ok
+lvebx ok
+lvehx ok
+lvewx ok
+lvsl ok
+lvsr ok
+stvx ok
+stvxl ok
+stvebx ok
+stvehx ok
+stvewx ok
+dst ok
+dstt ok
+dstst ok
+dststt ok
+dss ok
+dssall ok
