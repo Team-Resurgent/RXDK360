@@ -171,8 +171,25 @@ _Noreturn void exit(int code) {
 /* tzinit.c: install the console's time zone as the default TZ. */
 extern void xbox_init_timezone(void);
 
+/* cache:\ is the title's writable utility drive. On the console it does not
+   exist until the title mounts it (the "\??\cache:" link is missing and opens
+   fail with STATUS_OBJECT_PATH_NOT_FOUND); the original Xbox's startup mounts
+   its utility drive the same way. XMountUtilityDrive comes from the XDK's
+   xapilib (translated): keep existing contents, 16KB clusters, a 64KB file
+   cache. xenia maps cache:\ itself and fails this call (no STFS devices), so a
+   failure is reported, not fatal. */
+extern unsigned long XMountUtilityDrive(int fFormatClean, unsigned long dwBytesPerCluster,
+                                        unsigned long dwFileCacheSize);
+
+static void mount_utility_drive(void) {
+    unsigned long err = XMountUtilityDrive(0, 0x4000, 0x10000);
+    if (err != 0)
+        DbgPrint("RXDK: XMountUtilityDrive failed (%lu); cache:\\ may be unavailable\n", err);
+}
+
 void _start(void) {
     init_process_heap();              /* before init: C++/CRT ctors may allocate */
+    mount_utility_drive();            /* after the heap (it allocates), before ctors that may open files */
     xbox_init_timezone();             /* after the heap (setenv), before ctors that may call localtime */
     run_init();
     int argc = build_args();
