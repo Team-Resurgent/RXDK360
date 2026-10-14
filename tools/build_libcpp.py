@@ -2,15 +2,15 @@
 """Build the C++ exception runtime for the Xbox 360 target into build/libc/libcpp.a.
 
 DWARF/Itanium EH, the same shape RXDK-Libs uses on the original Xbox:
-  * libunwind        -- the DWARF unwinder (+ our PE .eh_frame-length recovery
-                        patch in AddressSpace.hpp, since lld scatters archive
-                        FDEs and the __eh_frame_start/_end markers under-bracket).
+  * libunwind        -- the DWARF unwinder (baremetal: it reads .eh_frame
+                        between the __eh_frame_start/_end markers).
   * libc++abi (core) -- __cxa_throw / __cxa_begin_catch / the personality routine
                         / type_info matching / std::terminate handlers.
 
 Only the exception machinery is built, not the full libc++/STL. Titles that use
 exceptions link this alongside libc.a; the linker script (mktitle.py) gathers
-.eh_frame into one section bracketed by __eh_frame_start/__eh_frame_end.
+.eh_frame into one section bracketed by __eh_frame_start/__eh_frame_end, and
+ASSERTs that the markers sit at the section's edges.
 """
 import argparse
 import os
@@ -52,7 +52,7 @@ COMMON = [
 ]
 PICO_INC = ["-I" + os.path.join(PICO, "libc", "include")]
 
-# libunwind: the DWARF unwinder. Baremetal DWARF branch (our PE .eh_frame patch).
+# libunwind: the DWARF unwinder. Baremetal DWARF branch (.eh_frame from its markers).
 UNWIND_DIR = os.path.join(LLVM, "libunwind")
 UNWIND_SRCS = [
     "src/libunwind.cpp", "src/UnwindLevel1.c", "src/UnwindLevel1-gcc-ext.c",

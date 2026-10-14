@@ -649,14 +649,17 @@ SECTIONS {{
     *(.xdata)
     *(.xdata.*)
   }}
-  .eh_frame : {{
-    PROVIDE_HIDDEN(__eh_frame_start = .);
+  .eh_frame : {{                     /* libunwind finds FDEs only between the markers */
+    HIDDEN(__eh_frame_start = .);
     KEEP(*(.eh_frame))
     KEEP(*(.eh_frame.*))
-    PROVIDE_HIDDEN(__eh_frame_end = .);
+    HIDDEN(__eh_frame_end = .);
     PROVIDE_HIDDEN(__eh_frame_hdr_start = .);
     PROVIDE_HIDDEN(__eh_frame_hdr_end = .);
   }}
+  ASSERT(__eh_frame_start == ADDR(.eh_frame) &&
+         __eh_frame_end == ADDR(.eh_frame) + SIZEOF(.eh_frame),
+         ""__eh_frame_start/__eh_frame_end do not bracket all of .eh_frame; libunwind would miss FDEs"")
   . = ALIGN(0x{page:X});             /* CODE after RO: ImageXex IM1031 if RX shares the header page */
   .text   : {{ *(.text*) }}
   . = ALIGN(0x{page:X});             /* import thunks on their own CODE page */

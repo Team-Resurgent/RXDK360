@@ -99,20 +99,24 @@ SECTIONS {{
     *(.xdata)
     *(.xdata.*)
   }}
-  .eh_frame : {{                     /* distinct RO section (not merged with .rodata):
-                                        libunwind recovers length from the PE section
-                                        table at runtime. Same attributes as .rodata
-                                        so it may share the header/RO 64KB page. */
-    PROVIDE_HIDDEN(__eh_frame_start = .);
+  .eh_frame : {{                     /* distinct RO section (not merged with .rodata).
+                                        Same attributes as .rodata so it may share the
+                                        header/RO 64KB page. libunwind finds the FDEs
+                                        only between the two markers; the ASSERT below
+                                        holds them to the section's edges. */
+    HIDDEN(__eh_frame_start = .);
     KEEP(*(.eh_frame))
     KEEP(*(.eh_frame.*))
-    PROVIDE_HIDDEN(__eh_frame_end = .);
+    HIDDEN(__eh_frame_end = .);
     /* No .eh_frame_hdr (lld does not synthesise one for this PE target); give
        libunwind's DWARF-index path empty start==end markers so it falls back to
        a linear .eh_frame scan. */
     PROVIDE_HIDDEN(__eh_frame_hdr_start = .);
     PROVIDE_HIDDEN(__eh_frame_hdr_end = .);
   }}
+  ASSERT(__eh_frame_start == ADDR(.eh_frame) &&
+         __eh_frame_end == ADDR(.eh_frame) + SIZEOF(.eh_frame),
+         "__eh_frame_start/__eh_frame_end do not bracket all of .eh_frame; libunwind would miss FDEs")
   . = ALIGN(0x{page:X});             /* CODE after RO so xenia does not disassemble
                                         format strings, and so HW does not mix RX
                                         with the header page (IM1031 / C000007B). */
