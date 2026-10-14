@@ -15,8 +15,10 @@
  * backslash separators -- the 360 file system has no current-directory or
  * current-drive default (XDK "File Name Conventions"), so we do not synthesise
  * one; we only translate '/' to '\' for callers (libc++ <filesystem>) that join
- * with forward slashes. game:\ is the read-only title media; cache:\ is the
- * writable per-title utility drive (mounted via XMountUtilityDrive).
+ * with forward slashes. The kernel sees each path as an object name under
+ * "\??\", where the drive links live (pathres.c). game:\ is the read-only title
+ * media; cache:\ is the writable per-title utility drive, which crt_start.c
+ * mounts with XMountUtilityDrive before main.
  *
  * fds 0/1/2 are the console: read(0)/write(1,2) route through the registered
  * libc hooks (libc_hooks.c), falling back to DbgPrint / EOF -- so this file
@@ -141,11 +143,12 @@ int __rxdk_fd_install(void *h) {
     return fd;
 }
 
-/* Resolve a path to a fully-qualified 360 path (translate '/'->'\', apply the
-   libc cwd to relative paths, collapse ./..). Shared with dirio.c; defined in
-   pathres.c alongside getcwd/chdir. */
+/* Resolve a path to the kernel object name of a fully-qualified 360 path
+   (translate '/'->'\', apply the libc cwd to relative paths, collapse ./..,
+   prefix "\??\"). Shared with dirio.c; defined in pathres.c alongside
+   getcwd/chdir. */
 #define RXDK_PATH_BUF 1024
-extern const char *__rxdk_resolve_path(const char *in, char *out, size_t n);
+extern const char *__rxdk_nt_path(const char *in, char *out, size_t n);
 
 static NTSTATUS nt_open(const char *path, ULONG access, ULONG disp,
                         ULONG options, HANDLE *out) {
@@ -154,8 +157,8 @@ static NTSTATUS nt_open(const char *path, ULONG access, ULONG disp,
     IO_STATUS_BLOCK iosb;
     char buf[RXDK_PATH_BUF];
 
-    RtlInitAnsiString(&name, __rxdk_resolve_path(path, buf, sizeof buf));
-    obja.RootDirectory = NULL;   /* the drive path is fully-qualified */
+    RtlInitAnsiString(&name, __rxdk_nt_path(path, buf, sizeof buf));
+    obja.RootDirectory = NULL;   /* "\??\drive:\..." is fully-qualified */
     obja.ObjectName = &name;
     obja.Attributes = OBJ_CASE_INSENSITIVE;
     return NtCreateFile(out, access | NT_SYNCHRONIZE | NT_READ_ATTRS, &obja,

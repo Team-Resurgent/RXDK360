@@ -10,10 +10,11 @@
  * The Xbox 360 object manager has no per-process current directory: every path
  * handed to NtCreateFile must be fully qualified ("drive:\a\b"). To let portable
  * code use relative paths and chdir()/getcwd(), libc keeps its own cwd and
- * resolves every path through __rxdk_resolve_path() before a kernel call:
+ * resolves every path through __rxdk_resolve_path():
  *   - '/' is translated to '\';
  *   - a path with no "drive:" is taken relative to the cwd;
  *   - '.' and '..' components (and duplicate separators) are collapsed.
+ * Kernel calls take __rxdk_nt_path(), the same path under "\??\".
  *
  * The cwd defaults to "game:\" -- the drive a title is launched from (the same
  * mount xenia exposes the XEX's folder as, and the deployment root on hardware).
@@ -100,6 +101,21 @@ const char *__rxdk_resolve_path(const char *in, char *out, size_t n) {
     if (o == base && (size_t)(o - out) + 2 < n)  /* drive root */
         *o++ = '\\';
     *o = '\0';
+    return out;
+}
+
+/* The kernel object name for a path: resolved as above, then put under "\??\",
+   where the console's drive links (game:, cache:, ...) live. NtCreateFile and
+   FileRenameInformation take object names, and the console rejects a bare
+   "game:\x" with STATUS_OBJECT_NAME_INVALID; "\??\game:\x" opens it (the XDK's
+   CreateFile adds the same prefix). The cwd and getcwd() keep the drive form. */
+const char *__rxdk_nt_path(const char *in, char *out, size_t n) {
+    static const char prefix[] = "\\??\\";
+    const size_t plen = sizeof prefix - 1;
+    if (!in || n <= plen)
+        return in;
+    __rxdk_resolve_path(in, out + plen, n - plen);
+    memcpy(out, prefix, plen);
     return out;
 }
 

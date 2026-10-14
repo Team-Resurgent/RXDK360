@@ -97,7 +97,7 @@ extern int   stat(const char *path, struct stat *st);
 
 /* Translate '/'->'\', apply the libc cwd to relative paths, and collapse ./.. --
    shared with fileio.c, defined in pathres.c (which also has getcwd/chdir). */
-extern const char *__rxdk_resolve_path(const char *in, char *out, size_t n);
+extern const char *__rxdk_nt_path(const char *in, char *out, size_t n);
 
 static NTSTATUS nt_open(const char *path, ULONG access, ULONG disp,
                         ULONG options, HANDLE *out) {
@@ -105,7 +105,7 @@ static NTSTATUS nt_open(const char *path, ULONG access, ULONG disp,
     OBJECT_ATTRIBUTES obja;
     IO_STATUS_BLOCK iosb;
     char buf[PATH_MAX];
-    RtlInitAnsiString(&name, __rxdk_resolve_path(path, buf, sizeof buf));
+    RtlInitAnsiString(&name, __rxdk_nt_path(path, buf, sizeof buf));
     obja.RootDirectory = NULL;
     obja.ObjectName = &name;
     obja.Attributes = OBJ_CASE_INSENSITIVE;
@@ -238,7 +238,7 @@ int rename(const char *oldp, const char *newp) {
     }
     ri->ReplaceIfExists = 1;
     ri->RootDirectory = NULL;
-    RtlInitAnsiString(&ri->FileName, __rxdk_resolve_path(newp, nb, sizeof nb));
+    RtlInitAnsiString(&ri->FileName, __rxdk_nt_path(newp, nb, sizeof nb));
     if (!NT_SUCCESS(NtSetInformationFile(h, &iosb, ri, sizeof info, FILE_RENAME_INFO))) {
         NtClose(h); errno = EIO; return -1;
     }
