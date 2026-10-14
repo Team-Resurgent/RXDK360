@@ -362,6 +362,11 @@ namespace Rxdk.Xbox360.Xbdm
                         n.Fields["addr"] = $"0x{Xbox32(s.Address):X8}";
                         n.Fields["thread"] = $"0x{s.ThreadId:X8}";
                         n.Fields["code"] = $"0x{s.Code:X8}";
+                        n.Fields["flags"] = $"0x{s.Flags:X8}";
+                        // For an access violation these are the kind (0 read, 1 write,
+                        // 8 execute) and the faulting data address.
+                        n.Fields["info0"] = $"0x{s.Information0:X8}";
+                        n.Fields["info1"] = $"0x{s.Information1:X8}";
                         break;
                     }
                     case DmNotification.DebugStr:
