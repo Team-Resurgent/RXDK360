@@ -101,16 +101,21 @@ def cold_reboot():
 
 
 def _hold_bp(xex):
-    """A breakpoint address the title never executes -- its PE-header page, which
-    is read-only data, not code. Planting it makes debuglaunch stay attached
-    (WaitFor the BP) and stream notifications instead of detaching immediately."""
+    """A breakpoint address the title never executes: a reserved DOS-header field
+    (e_cp/e_crlc at +4), read-only data, not code. Planting it makes debuglaunch
+    stay attached (WaitFor the BP) and stream notifications instead of detaching.
+
+    The title reads the trap instruction XBDM writes there (XBDM's own memory reads
+    hide it), so it must not cover a field anything parses -- MZ at +0, e_lfanew at
+    +0x3C, the PE signature at +0x40. At +0x40 it made a header scan in libunwind
+    miss the image header and fault below the image on the devkit."""
     try:
         b = open(xex, "rb").read()
         sec = struct.unpack_from(">I", b, 0x10)[0]
         base = struct.unpack_from(">I", b, sec + 8 + 0x108)[0]   # imageInfo.loadAddress
     except Exception:                                            # noqa: BLE001
         base = 0x82000000
-    return "0x%08X" % (base + 0x40)                              # inside the DOS/PE header
+    return "0x%08X" % (base + 0x04)                              # reserved DOS-header field
 
 
 def launch_and_capture(xex, timeout, skip_faults=False):
