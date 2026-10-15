@@ -13,6 +13,8 @@
 //   Rxdk.Xbox360.Xbdm watch       [console]             print XBDM notifications (watch an official F5)
 //   Rxdk.Xbox360.Xbdm screenshot  [console] [file.bmp]  capture the kit front buffer via DmScreenShot
 //   Rxdk.Xbox360.Xbdm deploy  <console> <file> <remote> send a file to the console
+//   Rxdk.Xbox360.Xbdm dir     <console> <remoteDir>     list a directory on the console
+//   Rxdk.Xbox360.Xbdm getfile <console> <remote> <file> fetch a file from the console (e.g. a crash dump)
 //   Rxdk.Xbox360.Xbdm launch  <console> <imagePath>     reboot the console into a title (stopped)
 //   Rxdk.Xbox360.Xbdm mem     <console> <hexAddr> <len> read memory
 //   Rxdk.Xbox360.Xbdm reboot  [console]             cold-reboot the console (recovers a title
@@ -291,6 +293,28 @@ try
             c.Connect(args[1]);
             c.SendFile(args[2], args[3]);
             Console.WriteLine($"sent {args[2]} -> {args[3]}");
+            break;
+        }
+        case "dir":
+        {
+            using var c = new XbdmClient();
+            c.Connect(args[1]);
+            foreach (var e in c.WalkDir(args[2]))
+            {
+                ulong size = ((ulong)e.SizeHigh << 32) | e.SizeLow;
+                string when = DateTime.FromFileTime(e.ChangeTime).ToString("yyyy-MM-dd HH:mm:ss");
+                Console.WriteLine((e.Attributes & 0x10) != 0
+                    ? $"{when}  <dir>        {e.Name}"
+                    : $"{when}  {size,12}  {e.Name}");
+            }
+            break;
+        }
+        case "getfile":
+        {
+            using var c = new XbdmClient();
+            c.Connect(args[1]);
+            c.ReceiveFile(args[2], args[3]);
+            Console.WriteLine($"received {args[2]} -> {args[3]}");
             break;
         }
         case "launch":

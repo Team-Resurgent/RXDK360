@@ -126,6 +126,12 @@ namespace Rxdk.Xbox360.Xbdm
         public static extern int DmMkdir(string directoryName);
         [DllImport(Dll, CallingConvention = Cc, CharSet = CharSet.Ansi)]
         public static extern int DmDeleteFile(string fileName, [MarshalAs(UnmanagedType.Bool)] bool isDirectory);
+        [DllImport(Dll, CallingConvention = Cc, CharSet = CharSet.Ansi, EntryPoint = "DmReceiveFileA")]
+        public static extern int DmReceiveFile(string localName, string remoteName);
+        [DllImport(Dll, CallingConvention = Cc, CharSet = CharSet.Ansi)]
+        public static extern int DmWalkDir(ref IntPtr walk, string directory, out DmFileAttributes attributes);
+        [DllImport(Dll, CallingConvention = Cc)]
+        public static extern int DmCloseDir(IntPtr walk);
 
         // ---- reboot / launch ----
         [DllImport(Dll, CallingConvention = Cc)]
@@ -260,6 +266,19 @@ namespace Rxdk.Xbox360.Xbdm
         public uint ThreadId;
         public UIntPtr StartAddress;
         public IntPtr ThreadNameAddress;
+    }
+
+    /// <summary>DM_FILE_ATTRIBUTES (xbdm.h): one DmWalkDir entry.</summary>
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
+    public struct DmFileAttributes
+    {
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)]
+        public string Name;
+        public long CreationTime;   // FILETIME
+        public long ChangeTime;     // FILETIME
+        public uint SizeHigh;
+        public uint SizeLow;
+        public uint Attributes;     // FILE_ATTRIBUTE_*: 0x10 = directory
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 8)]

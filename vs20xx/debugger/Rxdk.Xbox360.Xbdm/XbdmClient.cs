@@ -430,6 +430,30 @@ namespace Rxdk.Xbox360.Xbdm
         public void Mkdir(string remoteDir) => NativeXbdm.DmMkdir(remoteDir); // ignore "already exists"
         public void SendFile(string localPath, string remotePath) =>
             Check("DmSendFile", NativeXbdm.DmSendFile(localPath, remotePath));
+        public void ReceiveFile(string remotePath, string localPath) =>
+            Check("DmReceiveFile", NativeXbdm.DmReceiveFile(localPath, remotePath));
+
+        /// <summary>The entries of a directory on the kit (DmWalkDir), e.g. "DEVKIT:\dumps".</summary>
+        public List<DmFileAttributes> WalkDir(string remoteDir)
+        {
+            var list = new List<DmFileAttributes>();
+            IntPtr walk = IntPtr.Zero;
+            try
+            {
+                while (true)
+                {
+                    int hr = NativeXbdm.DmWalkDir(ref walk, remoteDir, out var entry);
+                    if (hr == XbdmHResults.EndOfList) break;
+                    Check("DmWalkDir", hr);
+                    list.Add(entry);
+                }
+            }
+            finally
+            {
+                if (walk != IntPtr.Zero) NativeXbdm.DmCloseDir(walk);
+            }
+            return list;
+        }
 
         /// <summary>Capture the front buffer to a BMP on the PC (DmScreenShot).</summary>
         public void ScreenShot(string localBmpPath)
