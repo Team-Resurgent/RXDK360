@@ -187,7 +187,17 @@ static void mount_utility_drive(void) {
         DbgPrint("RXDK: XMountUtilityDrive failed (%lu); cache:\\ may be unavailable\n", err);
 }
 
+/* The console's XapiInitProcess enables xapilib's small-pages override so
+   XPhysicalAllocEx does not add MEM_LARGE_PAGES. Without it, large-page physical
+   allocations land in the 0x40000000 window, and d3d9d's D3DPOOL_DEFAULT texture
+   memory ends up at an alias the GPU cannot reach -- MmGetPhysicalAddress fails on
+   the texture base and d3d9d's AssertPhysical trips (the AdvancedLighting shadow-map
+   depth/variance texture). Our minimal startup must set it the same way, before any
+   allocation. (xapilib: physical.o -> g_fSmallPagesOverride.) */
+extern void XEnableSmallPagesOverride(int fEnable);
+
 void _start(void) {
+    XEnableSmallPagesOverride(1);     /* small (GPU-mappable) physical pages, before any alloc */
     init_process_heap();              /* before init: C++/CRT ctors may allocate */
     mount_utility_drive();            /* after the heap (it allocates), before ctors that may open files */
     xbox_init_timezone();             /* after the heap (setenv), before ctors that may call localtime */
