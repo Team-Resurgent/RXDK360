@@ -1,0 +1,162 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:RXDK360.SampleBrowser.ViewModels"
+        x:Class="RXDK360.SampleBrowser.Views.MainWindow"
+        x:DataType="vm:MainViewModel"
+        x:Name="Root"
+        Width="1180" Height="820"
+        MinWidth="820" MinHeight="560"
+        Background="{StaticResource BgBrush}"
+        TransparencyLevelHint="None"
+        Icon="/Assets/appicon.png"
+        Title="RXDK-360 Sample Browser">
+
+  <Grid RowDefinitions="Auto,Auto,*">
+
+    <!-- Header -->
+    <Border Grid.Row="0" Background="{StaticResource BgElevatedBrush}"
+            BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1"
+            Padding="24,16">
+      <DockPanel>
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+          <TextBlock Text="Open in" Classes="muted" VerticalAlignment="Center" />
+          <ComboBox MinWidth="240" ItemsSource="{Binding VsInstalls}"
+                    SelectedItem="{Binding SelectedVs}" />
+        </StackPanel>
+        <StackPanel Orientation="Vertical" Spacing="2">
+          <TextBlock Text="RXDK-360 Samples" Classes="h1" />
+          <TextBlock Text="{Binding HeaderSubtitle}" Classes="muted" FontSize="12" />
+        </StackPanel>
+      </DockPanel>
+    </Border>
+
+    <!-- Toolbar -->
+    <Border Grid.Row="1" Padding="24,14" Background="{StaticResource BgBrush}">
+      <Grid ColumnDefinitions="*,Auto,Auto" >
+        <TextBox Grid.Column="0" Watermark="Search samples, keywords…"
+                 Text="{Binding SearchText}" MaxWidth="520" HorizontalAlignment="Left"
+                 CornerRadius="6" />
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" Margin="12,0,0,0" VerticalAlignment="Center">
+          <TextBlock Text="Area" Classes="muted" VerticalAlignment="Center" />
+          <ComboBox MinWidth="160" ItemsSource="{Binding Areas}" SelectedItem="{Binding SelectedArea}" />
+        </StackPanel>
+        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" Margin="12,0,0,0" VerticalAlignment="Center">
+          <TextBlock Text="Sort" Classes="muted" VerticalAlignment="Center" />
+          <ComboBox MinWidth="130" ItemsSource="{Binding SortModes}" SelectedItem="{Binding SelectedSort}" />
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <!-- Sample list -->
+    <ScrollViewer Grid.Row="2" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+      <ItemsControl ItemsSource="{Binding Samples}" Margin="24,4,24,24">
+        <!-- Force each generated item container to fill the viewport width, so cards
+             don't size to their widest line (which overflowed and clipped the pill). -->
+        <ItemsControl.Styles>
+          <Style Selector="ContentPresenter">
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+          </Style>
+        </ItemsControl.Styles>
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:SampleViewModel" x:CompileBindings="False">
+            <Border Classes="card">
+              <Grid ColumnDefinitions="Auto,*">
+
+                <!-- Screenshot -->
+                <Border Grid.Column="0" Width="176" Height="99" CornerRadius="6"
+                        Background="#0B0E14" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                        ClipToBounds="True" VerticalAlignment="Top" Margin="0,0,14,0">
+                  <Panel>
+                    <TextBlock Text="No preview" Classes="muted" FontSize="11"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                               IsVisible="{Binding !HasScreenshot}" />
+                    <Image Source="{Binding Screenshot}" Stretch="UniformToFill"
+                           IsVisible="{Binding HasScreenshot}" />
+                  </Panel>
+                </Border>
+
+                <!-- Details -->
+                <StackPanel Grid.Column="1" Spacing="6">
+                  <DockPanel>
+                    <Border DockPanel.Dock="Right" Classes="pill" Margin="8,0,2,0"
+                            Background="{Binding DifficultyBrush}" IsVisible="{Binding HasDifficulty}">
+                      <TextBlock Text="{Binding DifficultyText}" Foreground="White" FontSize="11" FontWeight="SemiBold" />
+                    </Border>
+                    <TextBlock Text="{Binding Name}" FontSize="16" FontWeight="Bold"
+                               Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
+                  </DockPanel>
+
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <TextBlock Text="{Binding Area}" Classes="muted" FontSize="12" />
+                    <TextBlock Text="•" Classes="muted" FontSize="12" IsVisible="{Binding HasDate}" />
+                    <TextBlock Text="{Binding DateLabel}" Classes="muted" FontSize="12" IsVisible="{Binding HasDate}" />
+                  </StackPanel>
+
+                  <TextBlock Text="{Binding Description}" TextWrapping="Wrap"
+                             Foreground="{StaticResource TextBrush}" FontSize="13" MaxLines="3" />
+
+                  <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,4,0,0">
+                    <Button Content="Install"
+                            Classes="accent"
+                            Command="{Binding #Root.DataContext.BeginInstallCommand}"
+                            CommandParameter="{Binding}" />
+                    <Button Content="Documentation"
+                            Classes="ghost"
+                            IsVisible="{Binding HasDoc}"
+                            Command="{Binding #Root.DataContext.OpenDocCommand}"
+                            CommandParameter="{Binding}" />
+                  </StackPanel>
+                </StackPanel>
+              </Grid>
+            </Border>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </ScrollViewer>
+
+    <!-- Install overlay -->
+    <Border Grid.Row="0" Grid.RowSpan="3" Background="#CC0A0D12"
+            IsVisible="{Binding InstallPanelOpen}">
+      <Border Width="520" VerticalAlignment="Center" HorizontalAlignment="Center"
+              Background="{StaticResource BgElevatedBrush}" BorderBrush="{StaticResource BorderBrush}"
+              BorderThickness="1" CornerRadius="12" Padding="24">
+        <StackPanel Spacing="14">
+          <TextBlock Text="{Binding InstallTarget.Name, StringFormat='Install {0}'}" Classes="h1" />
+          <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
+                     Text="Copies the sample and the shared Common framework into a folder, renames the project, then opens it in the selected Visual Studio." />
+
+          <StackPanel Spacing="4">
+            <TextBlock Text="Project name" Classes="muted" FontSize="12" />
+            <TextBox Text="{Binding InstallName}" CornerRadius="6" />
+          </StackPanel>
+
+          <StackPanel Spacing="4">
+            <TextBlock Text="Location" Classes="muted" FontSize="12" />
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBox Grid.Column="0" Text="{Binding InstallLocation}" CornerRadius="6" />
+              <Button Grid.Column="1" Content="Browse…" Classes="ghost" Margin="8,0,0,0"
+                      Name="BrowseButton" Click="OnBrowse" />
+            </Grid>
+          </StackPanel>
+
+          <StackPanel Spacing="4">
+            <TextBlock Text="Open in" Classes="muted" FontSize="12" />
+            <ComboBox HorizontalAlignment="Stretch" ItemsSource="{Binding VsInstalls}" SelectedItem="{Binding SelectedVs}" />
+          </StackPanel>
+
+          <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsInstalling}" />
+          <TextBlock Text="{Binding StatusText}" Classes="muted" FontSize="12" TextWrapping="Wrap"
+                     IsVisible="{Binding HasStatus}" />
+
+          <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10">
+            <Button Content="Cancel" Classes="ghost" Command="{Binding CancelInstallCommand}"
+                    IsEnabled="{Binding !IsInstalling}" />
+            <Button Content="Install" Classes="accent" Command="{Binding ConfirmInstallCommand}"
+                    IsEnabled="{Binding !IsInstalling}" />
+          </StackPanel>
+        </StackPanel>
+      </Border>
+    </Border>
+
+  </Grid>
+</Window>
