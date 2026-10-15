@@ -34,7 +34,7 @@ jobs:
           fetch-depth: 1
           submodules: false
 
-      - name: Init picolibc
+      - name: Init submodules (picolibc, samples)
         shell: pwsh
         run: powershell -NoProfile -File scripts/init-submodules.ps1
 
