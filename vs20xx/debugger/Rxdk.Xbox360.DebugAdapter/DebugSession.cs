@@ -31,6 +31,7 @@ namespace Rxdk.Xbox360.DebugAdapter
         private bool _haveCtx;
         private bool _holdingInitialBreak;
         private int _paused; // 1 = already reported stopped; ignore extra kit breaks
+        private bool _diagDumped; // one fault register/stack dump per stop
         private uint _titleBase, _titleSize;
         private const int LocalsRef = 1000;
         private int _nextChildRef = 1001;
@@ -247,32 +248,150 @@ namespace Rxdk.Xbox360.DebugAdapter
             var frames = new List<object>();
             if (_haveCtx)
             {
-                uint pc = _ctx.Iar;
-                var loc = _sym?.LineAtKit(pc, _titleBase);
-                // Normalize to Windows separators: clang DWARF paths mix '/' into an
-                // otherwise '\' path (e.g. ...\AdvancedLighting/AdvancedLighting.cpp), and
-                // VS then fails to match the open document, so it won't focus the editor on
-                // the stop line (you have to scroll to the breakpoint yourself).
-                string file = (loc?.File ?? "").Replace('/', '\\');
-                string fn = loc is { Function: { Length: > 0 } } ? loc.Value.Function : $"0x{pc:X8}";
-                string srcName = file.Length == 0 ? "unknown" : Path.GetFileName(file);
-                var frame = new Dictionary<string, object?>
+                DumpFaultDiag();
+                var pcs = UnwindPcs();
+                for (int i = 0; i < pcs.Count; i++)
                 {
-                    ["id"] = 0,
-                    ["name"] = fn,
-                    ["line"] = loc?.Line ?? 0,
-                    ["column"] = 1,
-                    ["source"] = new Dictionary<string, object?>
+                    uint pc = pcs[i];
+                    // Frames above 0 report the *return* address; the call that got us
+                    // there is the instruction before it, so resolve pc-4 for line info.
+                    uint lookup = i == 0 ? pc : pc - 4;
+                    var loc = _sym?.LineAtKit(lookup, _titleBase);
+                    // Normalize to Windows separators: clang DWARF paths mix '/' into an
+                    // otherwise '\' path (e.g. ...\AdvancedLighting/AdvancedLighting.cpp), and
+                    // VS then fails to match the open document, so it won't focus the editor on
+                    // the stop line (you have to scroll to the breakpoint yourself).
+                    string file = (loc?.File ?? "").Replace('/', '\\');
+                    string fn = loc is { Function: { Length: > 0 } } ? loc.Value.Function : $"0x{pc:X8}";
+                    string srcName = file.Length == 0 ? "unknown" : Path.GetFileName(file);
+                    var frame = new Dictionary<string, object?>
                     {
-                        ["name"] = srcName,
-                        ["path"] = file,
-                    },
-                };
-                if (file.Length == 0)
-                    ((Dictionary<string, object?>)frame["source"]!)["presentationHint"] = "deemphasize";
-                frames.Add(frame);
+                        ["id"] = i,
+                        ["name"] = fn,
+                        ["line"] = loc?.Line ?? 0,
+                        ["column"] = 1,
+                        ["source"] = new Dictionary<string, object?>
+                        {
+                            ["name"] = srcName,
+                            ["path"] = file,
+                        },
+                    };
+                    if (file.Length == 0)
+                        ((Dictionary<string, object?>)frame["source"]!)["presentationHint"] = "deemphasize";
+                    frames.Add(frame);
+                }
             }
             _dap.SendResponse(req, true, new { stackFrames = frames, totalFrames = frames.Count });
+        }
+
+        // One-shot fault dump: the raw GPRs at the stop plus a window of the stack, so a
+        // crash inside a leaf like memcpy can be traced back to the pointer/length its
+        // caller handed it. Emitted to the VS console and the title log on the first
+        // stackTrace after a stop.
+        private void DumpFaultDiag()
+        {
+            if (_diagDumped || !_haveCtx || _ctx.Gpr == null || _kit == null) return;
+            _diagDumped = true;
+            var sb = new System.Text.StringBuilder();
+            sb.Append($"FAULTDIAG IAR=0x{_ctx.Iar:X8} LR=0x{_ctx.Lr:X8}\n");
+            for (int i = 0; i < 32; i += 4)
+                sb.Append($"  r{i,-2}=0x{(uint)_ctx.Gpr[i]:X8} r{i + 1,-2}=0x{(uint)_ctx.Gpr[i + 1]:X8} " +
+                          $"r{i + 2,-2}=0x{(uint)_ctx.Gpr[i + 2]:X8} r{i + 3,-2}=0x{(uint)_ctx.Gpr[i + 3]:X8}\n");
+            var mem = new KitMemory(_kit);
+            // Walk frames, dumping each frame's SP + a stack window. push_back stashes
+            // the vector `this` at [SP+96]; the vector layout is {__begin_,__end_,__cap_}
+            // at this+0/+4/+8 -- enough to see which pointer is corrupt and where the
+            // real buffer is.
+            uint sp = (uint)_ctx.Gpr[1];
+            uint prevSp = 0;
+            for (int frame = 0; frame < 12 && sp != 0 && InStack(sp); frame++)
+            {
+                if (mem.ReadDword(sp) is not uint back || back <= sp || back - sp > 0x100000)
+                { sb.Append($"  frame{frame} sp=0x{sp:X8}: <bad back chain>\n"); break; }
+                sb.Append($"  frame{frame} sp=0x{sp:X8} size=0x{back - sp:X}: ");
+                for (int i = 0; i < 12; i++)
+                    sb.Append($"0x{(mem.ReadDword(sp + (uint)(i * 4)) ?? 0xEEEEEEEE):X8} ");
+                sb.Append('\n');
+                // push_back stashes the vector `this` at [sp+96]; its caller CopyAttributes
+                // has a big frame (712-byte local). When this frame calls into a >=0x300
+                // frame, treat it as push_back and dump the vector layout {begin,end,cap}.
+                prevSp = sp;
+                sp = back;
+            }
+            // d3d9d caches its valid physical-memory range in these globals; the
+            // AssertPhysical path (AddRTListData) rejects any resource address outside
+            // it. Dumping them tells us the window d3d expects vs where our GPU heap is.
+            foreach (uint g in new uint[] { 0x826061C4, 0x826061C8, 0x826061CC, 0x826061D0 })
+                sb.Append($"  D3DGLOBAL[0x{g:X8}] = 0x{(mem.ReadDword(g) ?? 0xEEEEEEEE):X8}\n");
+            // Deref any register that points into title data or the GPU/physical heap,
+            // so an object (e.g. a D3D texture header, whose GPU base address the
+            // resolve/AssertPhysical path reads) can be inspected without a live probe.
+            for (int i = 0; i < 32; i++)
+            {
+                uint v = (uint)_ctx.Gpr[i];
+                bool titleData = InTitle(v);
+                bool gpuHeap = v >= 0x40000000 && v < 0x40200000;
+                if (!titleData && !gpuHeap) continue;
+                sb.Append($"  r{i}->0x{v:X8}: ");
+                for (int k = 0; k < 8; k++) sb.Append($"0x{(mem.ReadDword(v + (uint)(k * 4)) ?? 0xEEEEEEEE):X8} ");
+                sb.Append('\n');
+            }
+            string s = sb.ToString();
+            _dap.SendEvent("output", new { category = "console", output = s });
+            WriteTitleOutput(s);
+        }
+
+        private bool InTitle(uint a) =>
+            _titleBase != 0 && _titleSize != 0 && a >= _titleBase && a < _titleBase + _titleSize;
+
+        // The Xbox 360 title stack lives in the 0x70000000 range.
+        private static bool InStack(uint a) => a >= 0x70000000 && a < 0x80000000;
+
+        // A real return address lands just past a call: the preceding word must be a
+        // linking branch (bl, or bclrl/bcctrl). Used to tell a leaf frame (LR still
+        // holds the caller) from a non-leaf (LR was spilled to the stack) and to reject
+        // garbage while walking the back chain.
+        private bool IsCallSiteReturn(uint ret)
+        {
+            if (!InTitle(ret) || (ret & 3) != 0) return false;
+            if (ReadInsn(ret - 4) is not uint w) return false;
+            uint op = w >> 26;
+            if (op == 18) return (w & 1) != 0;                              // bl (I-form, LK set)
+            if (op == 19) { uint xo = (w >> 1) & 0x3FF; return (w & 1) != 0 && (xo == 16 || xo == 528); } // bclrl/bcctrl
+            return false;
+        }
+
+        // Walk the PowerPC stack. Our clang saves the return address with
+        // "stw r0,-8(r1)" before "stwu r1,-N(r1)", so a frame whose SP is P stored its
+        // caller's PC at (backchain(P) - 8), where backchain(P) = *(P). The innermost
+        // frame may be a leaf (memcpy et al.) that never spilled LR, so its caller comes
+        // from the LR register instead -- disambiguated by IsCallSiteReturn.
+        private List<uint> UnwindPcs()
+        {
+            var pcs = new List<uint>();
+            if (!_haveCtx || _kit == null || _ctx.Gpr == null) return pcs;
+            var mem = new KitMemory(_kit);
+            uint sp = (uint)_ctx.Gpr[1];
+            pcs.Add(_ctx.Iar);
+
+            uint? entry0 = mem.ReadDword(sp);                       // frame0 back chain = caller SP
+            uint lr = _ctx.Lr;
+            uint? stk = entry0 is uint e0 ? mem.ReadDword(e0 - 8) : null;   // frame0's spilled LR (if non-leaf)
+            uint cur;
+            if (IsCallSiteReturn(lr)) cur = lr;                     // leaf: LR is the caller
+            else if (stk is uint s && IsCallSiteReturn(s)) cur = s; // non-leaf: use spilled LR
+            else if (InTitle(lr)) cur = lr;                        // last resort
+            else return pcs;
+            sp = entry0 ?? 0;
+
+            for (int guard = 0; cur != 0 && InTitle(cur) && sp != 0 && guard < 64; guard++)
+            {
+                pcs.Add(cur);
+                if (mem.ReadDword(sp) is not uint entry || entry <= sp || entry - sp > 0x100000) break;
+                if (mem.ReadDword(entry - 8) is not uint ret || !IsCallSiteReturn(ret)) break;
+                cur = ret; sp = entry;
+            }
+            return pcs;
         }
 
         private void Scopes(DapConnection.Message req)
@@ -716,6 +835,7 @@ namespace Rxdk.Xbox360.DebugAdapter
                 if (tid == 0) tid = 1;
                 _stoppedThread = tid;
                 _haveCtx = false;
+                _diagDumped = false;
                 _expand.Clear();
                 _nextChildRef = LocalsRef + 1;
                 _dap.SendEvent("output", new { category = "console", output = "KIT " + n + "\n" });
@@ -764,9 +884,18 @@ namespace Rxdk.Xbox360.DebugAdapter
         private void TearDownKit(bool terminate)
         {
             var kit = _kit;
-            _kit = null;
-            if (kit == null) return;
+            if (kit == null) { _kit = null; return; }
             try { kit.Notification -= OnKitEvent; } catch { }
+            // Leave the kit in a clean, RUNNING state before we let go. If we detach or
+            // reboot while the title is stopped at a break, its threads stay suspended and
+            // our step traps stay planted -- xbdm/kernel state is then inconsistent and the
+            // NEXT cold boot hangs at the logo (had to power-cycle to recover). So first
+            // pull every step breakpoint and continue all threads, regardless of whether
+            // we terminate or detach. (_kit is still live here so ClearStepBps works.)
+            try { EndStep(); } catch { }
+            try { foreach (var e in _breakpoints) kit.RemoveBreakpoint(e.addr); } catch { }
+            try { kit.ContinueAll(); } catch { }
+            _kit = null;
             try
             {
                 if (terminate) kit.RebootToDashboard();

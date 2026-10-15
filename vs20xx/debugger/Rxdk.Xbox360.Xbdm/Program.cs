@@ -114,6 +114,16 @@ try
             {
                 var stop = c.LaunchStopped(image);
                 Console.WriteLine($"initial break: {stop}");
+                // RXDK_POKE="0xADDR=0xVAL": write a 32-bit BE value at the initial
+                // break (before any allocation) -- e.g. set g_fSmallPagesOverride.
+                var poke = Environment.GetEnvironmentVariable("RXDK_POKE");
+                if (!string.IsNullOrEmpty(poke))
+                {
+                    var pp = poke.Split('=');
+                    uint pa = Convert.ToUInt32(pp[0], 16), pv = Convert.ToUInt32(pp[1], 16);
+                    c.WriteMemory(pa, new byte[] { (byte)(pv >> 24), (byte)(pv >> 16), (byte)(pv >> 8), (byte)pv });
+                    Console.WriteLine($"poked 0x{pa:X8} = 0x{pv:X8}");
+                }
                 string titleHint = Path.GetFileNameWithoutExtension(image);
                 uint titleBase = 0, titleSize = 0;
                 foreach (var m in c.WalkLoadedModules())
@@ -159,6 +169,16 @@ try
                 {
                     Console.WriteLine("no source BPs — auto-continue");
                     c.ContinueAll();
+                    // Keep the debug-string channel open so DbgPrint/OutputDebugString
+                    // from the running title (e.g. [SMWIN]) is captured. Detach after
+                    // RXDK_LISTEN seconds (default 45).
+                    int listen = int.TryParse(Environment.GetEnvironmentVariable("RXDK_LISTEN"), out var ls) ? ls : 45;
+                    if (listen > 0)
+                    {
+                        Console.WriteLine($"listening for debug strings for {listen}s...");
+                        var until = DateTime.UtcNow.AddSeconds(listen);
+                        while (DateTime.UtcNow < until) Thread.Sleep(200);
+                    }
                 }
                 c.Resume(detach: true);
                 Console.WriteLine("resumed (debugger detached)");
@@ -182,6 +202,73 @@ try
             c.Connect(kit);
             c.Reboot(DmBoot.Cold);
             Console.WriteLine($"rebooted {kit}");
+            break;
+        }
+        case "trace":
+        {
+            // trace [console] <xex> <bpHex> [reg] [seconds] : deploy+launch, plant a
+            // breakpoint, and on every hit log GPR[reg] then auto-continue -- a
+            // tracepoint that captures a full allocation sequence without stopping.
+            string? kit = null, image = null; uint bp = 0; int reg = 31; int seconds = 80; int maxHits = 8000;
+            var seen = new System.Collections.Generic.List<int>();
+            for (int i = 1; i < args.Length; i++)
+            {
+                if (IsImagePath(args[i])) image = args[i];
+                else if (LooksLikeHex(args[i])) bp = ParseHex(args[i]);
+                else if (int.TryParse(args[i], out var iv)) seen.Add(iv);
+                else kit = args[i];
+            }
+            if (seen.Count > 0) reg = seen[0];
+            if (seen.Count > 1) seconds = seen[1];
+            if (image == null || bp == 0)
+                throw new InvalidOperationException("usage: Rxdk.Xbox360.Xbdm trace [console] <xex> <bpHex> [reg] [seconds]");
+            kit ??= ConsoleName(99);
+            using var c = new XbdmClient();
+            c.Connect(kit);
+            // RXDK_ARM=0xADDR : run to this BP first (once), THEN plant the trace BP.
+            // Lets us skip every allocation before a specific call site.
+            uint arm = 0;
+            var armEnv = Environment.GetEnvironmentVariable("RXDK_ARM");
+            if (!string.IsNullOrEmpty(armEnv)) arm = Convert.ToUInt32(armEnv, 16);
+            Console.WriteLine($"connected: {kit}; trace bp=0x{bp:X8} reg=r{reg} for {seconds}s" + (arm != 0 ? $"; arm=0x{arm:X8}" : ""));
+            var stop = c.LaunchStopped(image);
+            if (arm != 0)
+            {
+                c.SetBreakpoint(arm);
+                c.ContinueAll();
+                if (c.WaitFor(x => x.Kind is "break" && x.Addr is uint aa && aa == arm, TimeSpan.FromSeconds(seconds), out var ah))
+                {
+                    Console.WriteLine($"[ARM] hit 0x{arm:X8} thread=0x{ah.Thread:X8} -- planting trace BP");
+                    try { c.RemoveBreakpoint(arm); } catch { }
+                    c.SetBreakpoint(bp);
+                    uint atid = ah.Thread ?? 0;
+                    try { c.ContinueThread(atid, false); c.Go(); } catch { try { c.ContinueAll(); } catch { } }
+                }
+                else { Console.WriteLine("[ARM] timed out waiting for arm BP"); try { c.Resume(detach: true); } catch { } break; }
+            }
+            else
+            {
+                c.SetBreakpoint(bp);
+                c.ContinueAll();
+            }
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(seconds);
+            int n = 0, below = 0;
+            while (n < maxHits)
+            {
+                var left = deadline - DateTime.UtcNow;
+                if (left <= TimeSpan.Zero) break;
+                if (!c.WaitFor(x => x.Kind is "break" && x.Addr is uint a && a == bp, left, out var hit)) break;
+                uint tid = hit.Thread ?? 0; uint val = 0, r29 = 0, r30 = 0, r31 = 0;
+                try { var ctx = c.GetContext(tid, XContextFlags.Integer); val = (uint)ctx.Gpr[reg]; r29 = (uint)ctx.Gpr[29]; r30 = (uint)ctx.Gpr[30]; r31 = (uint)ctx.Gpr[31]; } catch { }
+                bool bad = val != 0 && val < 0xA0000000;
+                if (bad) below++;
+                Console.WriteLine($"[TRACE] #{n,-4} r{reg}=0x{val:X8} r29(align)=0x{r29:X8} r30(prot)=0x{r30:X8} r31(result)=0x{r31:X8}{(bad ? "  *** BELOW 0xA0000000 ***" : "")}");
+                n++;
+                // fast continue: step the faulting thread past the BP and go (no full thread walk)
+                try { c.ContinueThread(tid, false); c.Go(); } catch { try { c.ContinueAll(); } catch { } }
+            }
+            Console.WriteLine($"[TRACE] done: {n} hits, {below} below 0xA0000000");
+            try { c.Resume(detach: true); } catch { }
             break;
         }
         case "halt":
@@ -376,6 +463,9 @@ static void DumpTitleThreads(XbdmClient c, uint titleBase, uint titleSize)
                  (start >= titleBase && start < titleBase + titleSize));
             if (halted || inTitle)
                 Console.WriteLine($"  thread 0x{tid:X8}  PC=0x{ctx.Iar:X8}  LR=0x{ctx.Lr:X8}  start=0x{start:X8}{(inTitle ? "  [title]" : "")}{(halted ? "  [stopped]" : "")}");
+            if (halted && ctx.Gpr != null)
+                for (int g = 0; g < 32; g += 4)
+                    Console.WriteLine($"    r{g,-2}=0x{(uint)ctx.Gpr[g]:X8} r{g + 1,-2}=0x{(uint)ctx.Gpr[g + 1]:X8} r{g + 2,-2}=0x{(uint)ctx.Gpr[g + 2]:X8} r{g + 3,-2}=0x{(uint)ctx.Gpr[g + 3]:X8}");
         }
         catch { }
     }

@@ -229,8 +229,17 @@ namespace Rxdk.Xbox360.Xbdm
         public void Connect(string consoleNameOrIp, uint timeoutMs = 5000)
         {
             _console = consoleNameOrIp;
-            NativeXbdm.DmUseSharedConnection(true);
-            Check("DmSetXboxNameNoRegister", NativeXbdm.DmSetXboxNameNoRegister(consoleNameOrIp));
+            // Diagnostic overrides (env): RXDK_XBDM_DEDICATED=1 uses a dedicated
+            // (non-shared) DM connection; RXDK_XBDM_REGISTER=1 registers/resolves the
+            // name via DmSetXboxName instead of the NoRegister variant. Defaults keep
+            // the shipping behaviour so the VS adapter is unaffected.
+            bool dedicated = Environment.GetEnvironmentVariable("RXDK_XBDM_DEDICATED") == "1";
+            bool register = Environment.GetEnvironmentVariable("RXDK_XBDM_REGISTER") == "1";
+            NativeXbdm.DmUseSharedConnection(!dedicated);
+            if (register)
+                Check("DmSetXboxName", NativeXbdm.DmSetXboxName(consoleNameOrIp));
+            else
+                Check("DmSetXboxNameNoRegister", NativeXbdm.DmSetXboxNameNoRegister(consoleNameOrIp));
             NativeXbdm.DmSetConnectionTimeout(timeoutMs, timeoutMs);
             Check("DmOpenConnection", NativeXbdm.DmOpenConnection(out _connection));
         }
