@@ -312,6 +312,10 @@ def main():
 
     if not os.path.exists(CLANG):
         sys.exit("patched clang not found: %s (build tools/build-llvm.bat)" % CLANG)
+    for tool in (OBJCOPY, OBJDUMP):
+        if not os.path.exists(tool):
+            sys.exit("%s not found: the toolchain predates the inspection tools "
+                     "(run scripts/fetch-clang.ps1)" % tool)
 
     objdir = os.path.join(os.path.dirname(args.out), "obj")
     os.makedirs(objdir, exist_ok=True)
