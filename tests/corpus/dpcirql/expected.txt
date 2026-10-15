@@ -1,0 +1,6 @@
+irql at PASSIVE_LEVEL: 0
+irql after KeRaiseIrqlToDpcLevel: 2
+integer copy in a DPC: 300 DPCs, interrupted the main thread, v0-v7 and f0-f7 intact, copy correct
+irql in a DPC: 2
+memcpy 256 in a DPC: 300 DPCs, interrupted the main thread, v0-v7 and f0-f7 intact, copy correct
+memcpy 4096 in a DPC: 300 DPCs, interrupted the main thread, v0-v7 and f0-f7 intact, copy correct

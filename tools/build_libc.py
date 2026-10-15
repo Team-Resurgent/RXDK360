@@ -19,6 +19,7 @@ Usage:
 import argparse
 import glob
 import os
+import re
 import subprocess
 import sys
 
@@ -29,6 +30,24 @@ CONFIG = os.path.join(ROOT, "runtime", "config")
 
 CLANG = os.environ.get("RXDK_CLANG", os.path.join(ROOT, "build", "llvm", "bin", "clang.exe"))
 AR = os.environ.get("RXDK_AR", os.path.join(ROOT, "build", "llvm", "bin", "llvm-ar.exe"))
+OBJCOPY = os.environ.get("RXDK_OBJCOPY", os.path.join(ROOT, "build", "llvm", "bin", "llvm-objcopy.exe"))
+OBJDUMP = os.environ.get("RXDK_OBJDUMP", os.path.join(ROOT, "build", "llvm", "bin", "llvm-objdump.exe"))
+
+# memcpy / memmove / mempcpy must be safe at any IRQL: a DPC that ran picolibc's
+# vectorized memcpy crashed the title on a devkit. picolibc's three are kept for
+# PASSIVE_LEVEL under these names (the sources #undef their own names, so the
+# rename is done on the object), and runtime/xbox/memcopy_irql.c defines the
+# public entry points.
+RENAME_SYMBOLS = {
+    ("string", "memcpy.c"): ("memcpy", "__rxdk_memcpy_vector"),
+    ("string", "memmove.c"): ("memmove", "__rxdk_memmove_vector"),
+    ("string", "mempcpy.c"): ("mempcpy", "__rxdk_mempcpy_vector"),
+}
+# Files that must not use the vector or floating-point units. The build checks
+# their objects contain no VMX/FP instruction.
+NO_VMX_FP = {"memcopy_irql.c": ["-mno-altivec", "-msoft-float"]}
+VMX_FP_INSN = re.compile(r"^\s*[0-9a-f]+:\s+(lvx|stvx|lvxl|stvxl|lvlx|stvlx|lvrx|stvrx|lvsl|lvsr|lve[bhw]x|"
+                         r"stve[bhw]x|v[a-z0-9]+|mtvscr|mfvscr|lf[ds]u?x?|stf[ds]u?x?|stfiwx|f[a-z]+\.?)\s")
 TRIPLE = "powerpc64-unknown-xbox360"
 
 # picolibc's own flags (mirrors RXDK-Libs build/xbox_target.zig picolibcFlags):
@@ -121,6 +140,7 @@ LIBM_EXCLUDE_MATH_KEEP = set(["sf_exp2.c"])
 # .cpp C++ runtime compiles with the C++ flag set below.
 XBOX_GLUE = [
     os.path.join(ROOT, "runtime", "xbox", "ms_printf.c"),           # MSVC %S/%C/%I64 rewrite
+    os.path.join(ROOT, "runtime", "xbox", "memcopy_irql.c"),       # memcpy/memmove/mempcpy: no VMX above PASSIVE_LEVEL
     os.path.join(ROOT, "runtime", "xbox", "ms_crt_compat.c"),       # MS CRT compat: _stricmp/_snprintf/_wtoi/_s wrappers/security cookie (parity: shipped XDK libs link against ours)
     os.path.join(ROOT, "runtime", "xbox", "rt_support.c"),          # 64-bit div + console-pool malloc
     os.path.join(ROOT, "runtime", "xbox", "cxxrt.cpp"),             # operator new/delete + __cxa_*
@@ -306,14 +326,26 @@ def main():
         if os.path.splitext(src)[1].lower() in (".cpp", ".cc", ".cxx"):
             cmd = [CLANG] + CPP_FLAGS + ["-c", src, "-o", obj]
         else:
-            cmd = [CLANG] + FLAGS + INCLUDES + ["-c", src, "-o", obj]
+            cmd = [CLANG] + FLAGS + NO_VMX_FP.get(os.path.basename(src), []) + INCLUDES + ["-c", src, "-o", obj]
         r = subprocess.run(cmd, capture_output=True, text=True)
         if r.returncode != 0:
             failed.append((src, r.stderr.strip().splitlines()[-1:] or [""]))
             if args.verbose:
                 print("FAIL %s\n%s" % (src, r.stderr))
-        else:
-            objs.append(obj)
+            continue
+        rename = RENAME_SYMBOLS.get((parent, os.path.basename(src)))
+        if rename:
+            r = subprocess.run([OBJCOPY, "--redefine-sym", "%s=%s" % rename, obj],
+                               capture_output=True, text=True)
+            if r.returncode != 0:
+                sys.exit("objcopy %s failed:\n%s" % (obj, r.stderr))
+        if os.path.basename(src) in NO_VMX_FP:
+            r = subprocess.run([OBJDUMP, "-d", "--no-show-raw-insn", obj], capture_output=True, text=True)
+            bad = [l.strip() for l in r.stdout.splitlines() if VMX_FP_INSN.search(l)]
+            if r.returncode != 0 or bad:
+                sys.exit("%s must not use VMX/FP registers:\n  %s"
+                         % (os.path.relpath(src, ROOT), "\n  ".join(bad[:10]) or r.stderr))
+        objs.append(obj)
 
     if failed:
         print("%d source(s) failed to compile:" % len(failed))
