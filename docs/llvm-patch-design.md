@@ -1,6 +1,6 @@
 # The LLVM patch: design
 
-Branch `teamresurgent` in `vendor/llvm-project`.
+Branch `xbox` in Team-Resurgent/llvm-project.
 
 ## The key realisation
 
@@ -84,7 +84,7 @@ lowering with a Lv2-style 32-bit-pointer data layout, and override five things".
 
 ## Status
 
-Branch `teamresurgent`, six commits building on the design above:
+Branch `xbox` (merged through PRs #2-#4), six commits building on the design above:
 
 | commit | contents |
 |---|---|

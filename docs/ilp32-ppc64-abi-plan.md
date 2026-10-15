@@ -49,7 +49,7 @@ produces exactly cl.exe's codegen: `ret_const` → single r3 (`rldic`), `add64` 
 ## What already exists (do NOT rebuild)
 
 The ILP32-on-ppc64 target is **partially present** in our LLVM fork
-(`vendor/llvm-project`, branch `teamresurgent`):
+(Team-Resurgent/llvm-project, branch `xbox`):
 
 - **clang target info** — `clang/lib/Basic/Targets.cpp` maps arch `ppc64` + OS
   `Xbox360` to `Xbox360TargetInfo<PPC64TargetInfo>`
