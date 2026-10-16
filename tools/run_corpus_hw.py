@@ -57,6 +57,11 @@ HANG_TIMEOUT = int(os.environ.get("RXDK_HW_TIMEOUT", "90"))   # seconds per samp
 
 # watch prints debug strings as: "<HH:MM:SS.fff>  debugstr thread=0x.. string=<text>"
 DEBUGSTR_RE = re.compile(r"\bdebugstr\b.*?\bstring=(.*)$")
+# The kernel loader's report on an image with a reservation (lwarx/stwcx.)
+# outside the Xenon interrupt protection: a header line, then one line per
+# instruction. The compiler protects every reservation it emits, so any of
+# these is a regression.
+LOADER_RE = re.compile(r"Improper instruction sequences|unprotected (?:l[bhwd]arx|st[bhwd]cx)")
 
 
 def is_isolated(srcdir):
@@ -182,6 +187,10 @@ def run_sample(runnable, out_name, rows):
         print("  title never reached its entry break -- cold-rebooting the kit and retrying once")
         cold_reboot()
         actual, complete, started = launch_and_capture(xex, HANG_TIMEOUT, skip_faults=skip)
+    loader = [l.strip() for l in actual if LOADER_RE.search(l)]
+    if loader:
+        rows.append(("(loader) %s" % out_name, "LOADER",
+                     loader[:6] + (["... %d lines" % len(loader)] if len(loader) > 6 else [])))
     sections = rc.split_sections(actual, names)
     for name, srcdir, _ in runnable:
         exp_path = os.path.join(srcdir, "expected.txt")
