@@ -1,0 +1,6 @@
+XMountUtilityDrive: 0
+table: magic Josh, version 1, this title in the current slot: yes
+table: signature verifies 1 (certificate 1), changed hash 0, signing again gives the same bytes and verifies 1
+partition: device type 7, 512-byte sectors, 080000000 bytes, superblock XTAF, 20 sectors a cluster
+volume: FATX, names up to 42, 16384-byte clusters, 00001FFDF clusters, serial is the superblock's
+cache: write 00000000, read back the same
