@@ -1,0 +1,6 @@
+control: calling DbgPrint between the fill and the check
+control: intact with nothing between, changed across a call
+DPCs: 300 DPCs, interrupted the holding thread, 592 bytes below r1 intact
+(redzone: debug-print trap from a frameless leaf)
+DPCs after a debug-print trap: 300 DPCs, interrupted the holding thread, 592 bytes below r1 intact
+preemption: competitor on the same hardware thread, ran while the holder was switched out, 592 bytes below r1 intact
