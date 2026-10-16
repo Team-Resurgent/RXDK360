@@ -1,0 +1,11 @@
+\??\game:\               00000000
+game:\ (bare)            C0000033
+\??\game:                00000000
+\??\nosuchdrive:\        C0000034
+game:\ under \??\        00000000
+missing file             C0000034
+missing directory        C000003A
+query \??\game:\         00000000
+query game:\ (bare)      C0000033
+query missing file       C0000034
+"" under game:\          00000000
