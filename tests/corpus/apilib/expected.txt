@@ -1,1 +1,2 @@
+(hello from prebuilt xapilib)
 apilib: OutputDebugStringA returned

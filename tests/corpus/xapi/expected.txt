@@ -1,1 +1,1 @@
-lang=1 region=0xFF avpack=8 vstd=8 aflags=0x10001
+lang=1 region=0xFF avpack=8 vstd=1 aflags=0x10001

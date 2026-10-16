@@ -45,7 +45,9 @@ XENIA_CWD = os.environ.get("RXDK_XENIA_CWD", r"D:\Git\xenia_canary_windows")
 XENIA_LOG = os.environ.get(
     "RXDK_XENIA_LOG", r"D:\Git\xenia-canary\build\bin\Windows\Release\xenia.log")
 
-DBG_RE = re.compile(r"\(DbgPrint\)\s?(.*)")
+# A title's debug output: DbgPrint, and OutputDebugString (xenia logs the
+# debug-print trap it raises as "(DebugPrint)"; a kit sends both as debugstr).
+DBG_RE = re.compile(r"\((?:DbgPrint|DebugPrint)\)\s?(.*)")
 SENTINEL = "##RXDK-CORPUS-END##"
 MARK = "== %s =="                      # per-test section marker the driver prints
 
