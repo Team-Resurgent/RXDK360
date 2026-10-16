@@ -12,8 +12,9 @@
    progress counter, until a 1 ms periodic kernel timer has run its DPC 300
    times. The DPC copies, then waits ~20 us: if the progress counter did not
    move, the DPC interrupted the main thread on its own hardware thread (a DPC
-   on another one would prove nothing). Hardware only: xenia neither implements
-   KeSetTimerEx nor runs DPCs on top of a guest thread. */
+   on another one would prove nothing). Hardware only: xenia runs a timer's
+   DPC on a host thread of its own, so it never interrupts the main thread
+   (tests/corpus/ketimer covers the timer and DPC semantics on both). */
 
 void KeInitializeDpc(void *dpc, void *routine, void *context);
 void KeInitializeTimerEx(void *timer, int type, unsigned process_type);

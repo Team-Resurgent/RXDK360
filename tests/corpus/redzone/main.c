@@ -18,8 +18,8 @@
    - Preemption: a busy thread of the same priority on the same hardware
      thread (checked with GetCurrentProcessorNumber) makes progress, which it
      can only do while this thread is switched out.
-   Hardware only: xenia neither implements KeSetTimerEx nor runs interrupts,
-   DPCs or other threads on a guest thread's stack. */
+   Hardware only: xenia runs no interrupts, timer DPCs or other threads on a
+   guest thread's stack. */
 
 void KeInitializeDpc(void *dpc, void *routine, void *context);
 void KeInitializeTimerEx(void *timer, int type, unsigned process_type);

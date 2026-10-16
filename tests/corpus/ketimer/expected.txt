@@ -1,0 +1,5 @@
+passive: insert 1, ran 1 time(s) before it returned, irql 2, dpc self, context C0DE, args 11 22
+dispatch: insert 1, again 0, remove 1, again 0, insert 1, ran 0 time(s) while raised
+lowered: ran 1 time(s), args 77 88
+one-shot: set 0, set again 1, wait 0, cancel after expiry 0
+periodic: set 0, 20 DPCs, irql 2, args the system time, cancel 1, stopped after cancel
