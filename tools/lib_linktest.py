@@ -66,27 +66,47 @@ def convert(lib_path, out_a):
     for rl in RUNTIME:
         if os.path.exists(rl):
             runtime += ["--runtime", rl]
-    r = sh([sys.executable, COFF2ELF, "archive", lib_path, "-o", out_a] + runtime)
+    r = sh([sys.executable, COFF2ELF, "archive", lib_path, "-o", out_a,
+            "--ppc64"] + runtime)
     return r.returncode == 0
 
 
 def undefined_syms(elf_path):
-    """(global_undef, weak_undef) name lists from an ELF's .symtab."""
+    """(global_undef, weak_undef) name lists from an ELF's .symtab.
+
+    Handles both ELFCLASS32 (Elf32_Shdr 40B / Elf32_Sym 16B) and ELFCLASS64
+    (Elf64_Shdr 64B / Elf64_Sym 24B, with the reordered name/info/other/shndx/
+    value/size layout) -- coff2elf --ppc64 emits the latter."""
     f = open(elf_path, "rb").read()
-    shoff = struct.unpack(">I", f[0x20:0x24])[0]
-    shnum = struct.unpack(">H", f[0x30:0x32])[0]
-    shent = struct.unpack(">H", f[0x2e:0x30])[0]
-    secs = [struct.unpack(">IIIIIIIIII", f[shoff + i * shent:shoff + i * shent + 40])
-            for i in range(shnum)]
+    elf64 = f[4] == 2
+    if elf64:
+        shoff = struct.unpack(">Q", f[0x28:0x30])[0]
+        shent = struct.unpack(">H", f[0x3a:0x3c])[0]
+        shnum = struct.unpack(">H", f[0x3c:0x3e])[0]
+        # Elf64_Shdr: name,type,flags,addr,offset,size,link,info,align,entsize
+        secs = [struct.unpack(">IIQQQQIIQQ", f[shoff + i * shent:shoff + i * shent + 64])
+                for i in range(shnum)]
+        symsz = 24
+    else:
+        shoff = struct.unpack(">I", f[0x20:0x24])[0]
+        shent = struct.unpack(">H", f[0x2e:0x30])[0]
+        shnum = struct.unpack(">H", f[0x30:0x32])[0]
+        secs = [struct.unpack(">IIIIIIIIII", f[shoff + i * shent:shoff + i * shent + 40])
+                for i in range(shnum)]
+        symsz = 16
     symtabs = [s for s in secs if s[1] == 2]
     if not symtabs:
         return [], []
-    _, _, _, _, soff, ssize, link, _, _, _ = symtabs[0]
+    # sh_offset=idx4, sh_size=idx5, sh_link=idx6 in both Shdr layouts.
+    soff, ssize, link = symtabs[0][4], symtabs[0][5], symtabs[0][6]
     stroff = secs[link][4]
     glob, weak = [], []
-    for j in range(ssize // 16):
-        nm, val, sz, info, other, shndx = struct.unpack(
-            ">IIIBBH", f[soff + j * 16:soff + j * 16 + 16])
+    for j in range(ssize // symsz):
+        rec = f[soff + j * symsz:soff + j * symsz + symsz]
+        if elf64:
+            nm, info, _other, shndx = struct.unpack(">IBBH", rec[:8])
+        else:
+            nm, _val, _sz, info, _other, shndx = struct.unpack(">IIIBBH", rec)
         if not nm or shndx != 0:
             continue
         end = f.index(b"\0", stroff + nm)
@@ -134,7 +154,7 @@ def main():
     s0c = os.path.join(WORK, "s0.c")
     s0o = os.path.join(WORK, "s0.o")
     open(s0c, "w").write("void _start(void){}\n")
-    sh([CLANG, "--target=powerpc-unknown-xbox360", "-c", s0c, "-o", s0o])
+    sh([CLANG, "--target=powerpc64-unknown-xbox360", "-c", s0c, "-o", s0o])
 
     # convert every lib once into the union
     union = {}
