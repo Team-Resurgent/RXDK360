@@ -196,6 +196,10 @@ class CoffObject:
 ET_REL = 1
 EM_PPC = 20
 EM_PPC64 = 21
+# PPC64 e_flags ABI-version nibble: 2 selects ELFv2. clang stamps 0x2 on the
+# modern powerpc64-unknown-xbox360 objects; lld refuses to link ELFv2 (0x2) and
+# ELFv1/unspecified (0x0) PPC64 objects together, so our import stubs must match.
+EF_PPC64_ABI_V2 = 0x2
 SHT_PROGBITS, SHT_SYMTAB, SHT_STRTAB, SHT_RELA, SHT_NOBITS = 1, 2, 3, 4, 8
 SHT_GROUP = 17
 SHF_WRITE, SHF_ALLOC, SHF_EXECINSTR, SHF_GROUP = 0x1, 0x2, 0x4, 0x200
@@ -849,7 +853,7 @@ def _write_elf(kept, elf_syms, strtab, first_global, rela, coff_to_elfshndx,
         # Elf64_Ehdr: type,machine,version, entry(8),phoff(8),shoff(8), flags,
         # ehsize,phentsize,phnum,shentsize,shnum,shstrndx.
         out += struct.pack(">HHIQQQIHHHHHH",
-                           ET_REL, EM_PPC64, 1, 0, 0, shoff, 0,
+                           ET_REL, EM_PPC64, 1, 0, 0, shoff, EF_PPC64_ABI_V2,
                            ehsize, 0, 0, shentsize, len(secs), shstrtab_idx)
     else:
         out += struct.pack(">HHIIIIIHHHHHH",
