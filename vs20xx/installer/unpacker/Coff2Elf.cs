@@ -1,19 +1,22 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Part of RXDK-360 - see LICENSE.md for the full GNU GPL v3.
 //
-// Translate the XDK's PPC COFF import/static libraries to PPC32 big-endian ELF
+// Translate the XDK's PPC COFF import/static libraries to big-endian ELF
 // archives at install time, with no Python. This is the C# twin of the
 // `archive` mode of tools/coff2elf.py: it reads a Microsoft archive (.lib) of
 // big-endian PowerPC COFF objects (machine 0x01F2, a format lld cannot read),
-// rewrites each object as a PPC32 big-endian ELF, and repacks the archive as a
-// System V `.a` that lld links natively.
+// rewrites each object as a big-endian ELF, and repacks the archive as a
+// System V `.a` that lld links natively. Translate's elf64 flag (default true)
+// selects ELFCLASS64/EM_PPC64 ELFv2 (powerpc64-unknown-xbox360, e_flags=0x2) to
+// match the modern clang toolchain; elf64=false is the legacy ELFCLASS32/EM_PPC.
 //
-// The output is validated byte-identical against tools/coff2elf.py, so every
-// subtlety of that translator is reproduced here: COMDAT section groups
-// (SHT_GROUP), weak-external default-alias resolution, COMMON -> SHN_COMMON,
-// STT_SECTION folding, the ADDR32/REL24/REFHI/REFLO+PAIR relocation math,
-// the code-signature strong/weak decision, locals-before-globals ordering,
-// string-table dedup order, and the ELF32-BE / System-V-`.a` byte layout.
+// The output is validated byte-identical against tools/coff2elf.py (its --ppc64
+// mode for elf64), so every subtlety of that translator is reproduced here:
+// COMDAT section groups (SHT_GROUP), weak-external default-alias resolution,
+// COMMON -> SHN_COMMON, STT_SECTION folding, the ADDR32/REL24/REFHI/REFLO+PAIR
+// relocation math, the code-signature strong/weak decision,
+// locals-before-globals ordering, string-table dedup order, and the ELF-BE /
+// System-V-`.a` byte layout (Elf32/Elf64 widths, Elf64_Sym field reorder).
 //
 // Only the `archive` orchestration is ported (dump/survey/emit/translate-all
 // are developer-only reporting modes with no install-time use). net472, no
@@ -35,6 +38,10 @@ namespace Rxdk.Xdk.Unpacker
         // ELF
         private const ushort ET_REL = 1;
         private const ushort EM_PPC = 20;
+        private const ushort EM_PPC64 = 21;
+        // PPC64 e_flags ABI-version nibble: 2 selects ELFv2 (matches coff2elf.py's
+        // EF_PPC64_ABI_V2). clang stamps 0x2 on powerpc64-unknown-xbox360 objects.
+        private const uint EF_PPC64_ABI_V2 = 0x2;
         private const uint SHT_PROGBITS = 1, SHT_SYMTAB = 2, SHT_STRTAB = 3, SHT_RELA = 4, SHT_NOBITS = 8;
         private const uint SHT_GROUP = 17;
         private const uint SHF_WRITE = 0x1, SHF_ALLOC = 0x2, SHF_EXECINSTR = 0x4, SHF_GROUP = 0x200;
@@ -76,6 +83,8 @@ namespace Rxdk.Xdk.Unpacker
         private static void PutU16BE(List<byte> o, ushort v) { o.Add((byte)(v >> 8)); o.Add((byte)v); }
         private static void PutU32BE(List<byte> o, uint v)
         { o.Add((byte)(v >> 24)); o.Add((byte)(v >> 16)); o.Add((byte)(v >> 8)); o.Add((byte)v); }
+        private static void PutU64BE(List<byte> o, ulong v)
+        { for (int s = 56; s >= 0; s -= 8) o.Add((byte)(v >> s)); }
 
         private static int IndexOfZero(byte[] b, int start)
         {
@@ -390,7 +399,7 @@ namespace Rxdk.Xdk.Unpacker
 
         // ---- coff_to_elf ----------------------------------------------------
 
-        private static byte[] CoffToElf(CoffObject obj, HashSet<string> noncomdatStrong, HashSet<string> externalStrong)
+        private static byte[] CoffToElf(CoffObject obj, HashSet<string> noncomdatStrong, HashSet<string> externalStrong, bool elf64)
         {
             // 1. decide which COFF sections survive, in order, ELF indices assigned.
             var kept = new List<Section>();                    // kept sections, in order
@@ -661,7 +670,7 @@ namespace Rxdk.Xdk.Unpacker
             }
 
             return WriteElf(kept, keptElfName, keptCoffIdx, coffToElfShndx, elfSyms, strtab,
-                            firstGlobal, relaList, groupsOrder, groupsByRoot);
+                            firstGlobal, relaList, groupsOrder, groupsByRoot, elf64);
         }
 
         private static string Split1(string s)
@@ -709,7 +718,7 @@ namespace Rxdk.Xdk.Unpacker
         private static byte[] WriteElf(List<Section> kept, List<string> keptElfName, List<int> keptCoffIdx,
             Dictionary<int, int> coffToElfShndx, List<ElfSym> elfSyms, StrTab strtab, int firstGlobal,
             List<KeyValuePair<int, List<RelaEntry>>> relaList, List<int> groupsOrder,
-            Dictionary<int, Group> groupsByRoot)
+            Dictionary<int, Group> groupsByRoot, bool elf64)
         {
             // kept elf_idx (1-based) -> group root elf_idx (SHF_GROUP membership)
             var memberRoot = new Dictionary<int, int>();
@@ -742,20 +751,34 @@ namespace Rxdk.Xdk.Unpacker
                     secs.Add(new ElfSec(keptElfName[elfIdx - 1], SHT_PROGBITS, flags, s.Data, align: align));
             }
 
-            // .symtab
+            // .symtab -- Elf32_Sym is name,value,size,info,other,shndx (16 bytes);
+            // Elf64_Sym reorders to name,info,other,shndx,value,size (24 bytes).
+            uint shAlign = elf64 ? 8u : 4u;
             var symBytes = new List<byte>();
             foreach (ElfSym e in elfSyms)
             {
-                PutU32BE(symBytes, e.NameOff);
-                PutU32BE(symBytes, e.Value);
-                PutU32BE(symBytes, e.Size);
-                symBytes.Add(e.Info);
-                symBytes.Add(e.Other);
-                PutU16BE(symBytes, e.Shndx);
+                if (elf64)
+                {
+                    PutU32BE(symBytes, e.NameOff);
+                    symBytes.Add(e.Info);
+                    symBytes.Add(e.Other);
+                    PutU16BE(symBytes, e.Shndx);
+                    PutU64BE(symBytes, e.Value);
+                    PutU64BE(symBytes, e.Size);
+                }
+                else
+                {
+                    PutU32BE(symBytes, e.NameOff);
+                    PutU32BE(symBytes, e.Value);
+                    PutU32BE(symBytes, e.Size);
+                    symBytes.Add(e.Info);
+                    symBytes.Add(e.Other);
+                    PutU16BE(symBytes, e.Shndx);
+                }
             }
             int symtabIdx = secs.Count;
             secs.Add(new ElfSec(".symtab", SHT_SYMTAB, data: symBytes.ToArray(), link: (uint)(symtabIdx + 1),
-                info: (uint)firstGlobal, align: 4, entsize: 16));
+                info: (uint)firstGlobal, align: shAlign, entsize: elf64 ? 24u : 16u));
             secs.Add(new ElfSec(".strtab", SHT_STRTAB, data: strtab.Buf.ToArray(), align: 1));
 
             // group root elf_idx -> secs[] indices that are its members
@@ -771,12 +794,21 @@ namespace Rxdk.Xdk.Unpacker
                 var blob = new List<byte>();
                 foreach (RelaEntry r in kv.Value)
                 {
-                    PutU32BE(blob, r.Off);
-                    PutU32BE(blob, (r.Sym << 8) | r.Type);
-                    PutU32BE(blob, r.Addend);
+                    if (elf64)
+                    {
+                        PutU64BE(blob, r.Off);
+                        PutU64BE(blob, ((ulong)r.Sym << 32) | r.Type);
+                        PutU64BE(blob, unchecked((ulong)(long)(int)r.Addend));   // sign-extend
+                    }
+                    else
+                    {
+                        PutU32BE(blob, r.Off);
+                        PutU32BE(blob, (r.Sym << 8) | r.Type);
+                        PutU32BE(blob, r.Addend);
+                    }
                 }
                 secs.Add(new ElfSec(".rela" + secs[target].Name, SHT_RELA, data: blob.ToArray(),
-                    link: (uint)symtabIdx, info: (uint)target, align: 4, entsize: 12, flags: rflags));
+                    link: (uint)symtabIdx, info: (uint)target, align: shAlign, entsize: elf64 ? 24u : 12u, flags: rflags));
                 if (memberRoot.ContainsKey(elfIdx))
                     groupSecidx[memberRoot[elfIdx]].Add(secs.Count - 1);
             }
@@ -801,8 +833,11 @@ namespace Rxdk.Xdk.Unpacker
             shstrSec.Size = shstrSec.Data.Length;
             secs.Add(shstrSec);
 
-            // layout: ELF header (52), each non-empty section (aligned), section headers.
-            int offset = 52;
+            // layout: ELF header (52/64), each non-empty section (aligned), section headers.
+            int ehsize = elf64 ? 64 : 52;
+            int shentsize = elf64 ? 64 : 40;
+            int alignEnd = elf64 ? 8 : 4;
+            int offset = ehsize;
             foreach (ElfSec sec in secs)
             {
                 if (sec.Typ == 0 || sec.Typ == SHT_NOBITS) { sec.Offset = 0; continue; }
@@ -811,26 +846,36 @@ namespace Rxdk.Xdk.Unpacker
                 sec.Offset = offset;
                 offset += sec.Data.Length;
             }
-            if (offset % 4 != 0) offset += 4 - (offset % 4);
+            if (offset % alignEnd != 0) offset += alignEnd - (offset % alignEnd);
             int shoff = offset;
 
             var outb = new List<byte>();
-            outb.AddRange(new byte[] { 0x7F, (byte)'E', (byte)'L', (byte)'F', 1, 2, 1, 0 });
+            outb.AddRange(new byte[] { 0x7F, (byte)'E', (byte)'L', (byte)'F', (byte)(elf64 ? 2 : 1), 2, 1, 0 });
             outb.AddRange(new byte[8]);                        // e_ident padding
             PutU16BE(outb, ET_REL);
-            PutU16BE(outb, EM_PPC);
+            PutU16BE(outb, elf64 ? EM_PPC64 : EM_PPC);
             PutU32BE(outb, 1);                                 // e_version
-            PutU32BE(outb, 0);                                 // e_entry
-            PutU32BE(outb, 0);                                 // e_phoff
-            PutU32BE(outb, (uint)shoff);                       // e_shoff
-            PutU32BE(outb, 0);                                 // e_flags
-            PutU16BE(outb, 52);                                // e_ehsize
+            if (elf64)
+            {
+                PutU64BE(outb, 0);                             // e_entry
+                PutU64BE(outb, 0);                             // e_phoff
+                PutU64BE(outb, (ulong)shoff);                  // e_shoff
+                PutU32BE(outb, EF_PPC64_ABI_V2);               // e_flags
+            }
+            else
+            {
+                PutU32BE(outb, 0);                             // e_entry
+                PutU32BE(outb, 0);                             // e_phoff
+                PutU32BE(outb, (uint)shoff);                   // e_shoff
+                PutU32BE(outb, 0);                             // e_flags
+            }
+            PutU16BE(outb, (ushort)ehsize);                    // e_ehsize
             PutU16BE(outb, 0);                                 // e_phentsize
             PutU16BE(outb, 0);                                 // e_phnum
-            PutU16BE(outb, 40);                                // e_shentsize
+            PutU16BE(outb, (ushort)shentsize);                 // e_shentsize
             PutU16BE(outb, (ushort)secs.Count);                // e_shnum
             PutU16BE(outb, (ushort)shstrtabIdx);               // e_shstrndx
-            while (outb.Count < 52) outb.Add(0);
+            while (outb.Count < ehsize) outb.Add(0);
 
             foreach (ElfSec sec in secs)
             {
@@ -842,16 +887,33 @@ namespace Rxdk.Xdk.Unpacker
 
             foreach (ElfSec sec in secs)
             {
-                PutU32BE(outb, (uint)sec.NameOff);
-                PutU32BE(outb, sec.Typ);
-                PutU32BE(outb, sec.Flags);
-                PutU32BE(outb, 0);                             // sh_addr
-                PutU32BE(outb, (uint)sec.Offset);
-                PutU32BE(outb, (uint)sec.Size);
-                PutU32BE(outb, sec.Link);
-                PutU32BE(outb, sec.Info);
-                PutU32BE(outb, sec.Align);
-                PutU32BE(outb, sec.Entsize);
+                if (elf64)
+                {
+                    // Elf64_Shdr: name,type, flags(8),addr(8),offset(8),size(8), link,info, align(8),entsize(8).
+                    PutU32BE(outb, (uint)sec.NameOff);
+                    PutU32BE(outb, sec.Typ);
+                    PutU64BE(outb, sec.Flags);
+                    PutU64BE(outb, 0);                         // sh_addr
+                    PutU64BE(outb, (ulong)sec.Offset);
+                    PutU64BE(outb, (ulong)sec.Size);
+                    PutU32BE(outb, sec.Link);
+                    PutU32BE(outb, sec.Info);
+                    PutU64BE(outb, sec.Align);
+                    PutU64BE(outb, sec.Entsize);
+                }
+                else
+                {
+                    PutU32BE(outb, (uint)sec.NameOff);
+                    PutU32BE(outb, sec.Typ);
+                    PutU32BE(outb, sec.Flags);
+                    PutU32BE(outb, 0);                         // sh_addr
+                    PutU32BE(outb, (uint)sec.Offset);
+                    PutU32BE(outb, (uint)sec.Size);
+                    PutU32BE(outb, sec.Link);
+                    PutU32BE(outb, sec.Info);
+                    PutU32BE(outb, sec.Align);
+                    PutU32BE(outb, sec.Entsize);
+                }
             }
             return outb.ToArray();
         }
@@ -990,11 +1052,13 @@ namespace Rxdk.Xdk.Unpacker
         // ---- orchestration --------------------------------------------------
 
         /// <summary>
-        /// Translate a whole PPC-COFF .lib to a PPC32-BE ELF `.a` that lld links.
+        /// Translate a whole PPC-COFF .lib to a PPC-BE ELF `.a` that lld links.
+        /// elf64=true emits ELFCLASS64/EM_PPC64 ELFv2 (the powerpc64-unknown-xbox360
+        /// toolchain, e_flags=0x2); elf64=false emits the legacy ELFCLASS32/EM_PPC.
         /// The runtime archives (libcpp.a, libc.a) supply the external-strong set.
         /// Returns the number of indexed symbols written to the archive index.
         /// </summary>
-        public static int Translate(string libPath, string outA, string[] runtimeLibs)
+        public static int Translate(string libPath, string outA, string[] runtimeLibs, bool elf64 = true)
         {
             byte[] blob = File.ReadAllBytes(libPath);
 
@@ -1032,7 +1096,7 @@ namespace Rxdk.Xdk.Unpacker
             var seen = new Dictionary<string, int>(StringComparer.Ordinal);
             foreach (var kv in coffMembers)
             {
-                byte[] elf = CoffToElf(kv.Value, noncomdatStrong, externalStrong);
+                byte[] elf = CoffToElf(kv.Value, noncomdatStrong, externalStrong, elf64);
                 string bas = kv.Key.Replace('\\', '/');
                 int slash = bas.LastIndexOf('/');
                 if (slash >= 0) bas = bas.Substring(slash + 1);
