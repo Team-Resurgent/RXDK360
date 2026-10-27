@@ -113,7 +113,12 @@ WARNING:  DO NOT MODIFY unless you understand MSBuild; a bad edit here breaks
     <IncludePath Condition="'$(IncludePath)' == '' and '$(RxdkClangXdkHeaders)' == 'true'">$(RxdkConfigInc);$(RxdkPicolibcInc);$(RxdkXdkIncludeDir);$(RxdkLibcxxInc);$(RxdkLibcxxabiInc);</IncludePath>
     <IncludePath Condition="'$(IncludePath)' == ''">$(RxdkLibcxxInc);$(RxdkLibcxxabiInc);$(RxdkConfigInc);$(RxdkPicolibcInc);$(RxdkXdkIncludeDir);</IncludePath>
     <LibraryPath Condition="'$(LibraryPath)' == ''">$(RxdkLibcDir);$(RxdkCoffDir);</LibraryPath>
-    <ExecutablePath Condition="'$(ExecutablePath)' == ''">$([System.IO.Path]::GetDirectoryName('$(RxdkClangPath)'));$(PATH);</ExecutablePath>
+    <!-- $(RxdkBinDir) ({app}\bin\win32) carries the stock XDK content compilers
+         (xuipkg, xactbld3, fxc, resx2bin, ...) that samples drive from VC custom
+         build steps. The 2010-01 toolset already lists it on ExecutablePath; the
+         clang toolset omitted it, so those steps failed with 9009 "not recognized"
+         unless the SDK bin happened to be on the system PATH. -->
+    <ExecutablePath Condition="'$(ExecutablePath)' == ''">$([System.IO.Path]::GetDirectoryName('$(RxdkClangPath)'));$(RxdkBinDir);$(PATH);</ExecutablePath>
     <!-- Surfaced read-only on the General property page (general.xml ->
          RxdkToolchainDisplay) so it is obvious at a glance which toolchain a
          project builds with. The stock 2010-01 toolset sets "Stock XDK". -->
