@@ -285,6 +285,31 @@ namespace Rxdk.Xdk.Unpacker
                     "#if !defined(_FILE_DEFINED) && !defined(_FILE_DECLARED) /* RXDK360 */\r\nstruct _iobuf",
                     "#ifndef _FILE_DEFINED\nstruct _iobuf",
                     "#if !defined(_FILE_DEFINED) && !defined(_FILE_DECLARED) /* RXDK360 */\nstruct _iobuf");
+
+            // __lvx/__stvx (vectorintrinsics.h) are `static __forceinline`, bodied as
+            // `*(__vector4*)((char*)base + offset)`. On the real XDK compiler that maps
+            // to the lvx/stvx instruction, which IGNORES the low 4 address bits (it
+            // truncates the effective address to the 16-byte boundary). clang instead
+            // lowers the 16-byte __vector4 aggregate load/store to two doubleword
+            // ld/std at the exact EA, which (a) raise STATUS_DATATYPE_MISALIGNMENT on an
+            // under-aligned pointer (the Xenon has no misaligned ld/std) and (b) touch
+            // the wrong bytes -- source code (e.g. the unaligned store-via-read-modify-
+            // write in FastCPU's VMXSkinning1: __lvx(p,11)/__lvx(p,0) + __lvsr + __vperm
+            // + __stvx) relies on the lvx truncation. Mask EA down to the 16-byte
+            // boundary in the body so clang matches the instruction: the loads are then
+            // naturally aligned (no fault) and the bytes read/written are correct. The
+            // anchor is single-line, so one spelling serves both line endings.
+            string vint = Path.Combine(xboxInc, "vectorintrinsics.h");
+            ReplaceOnce(vint,
+                "    return *(const __vector4*)((const char*)base + offset);",
+                "    return *(const __vector4*)((const char*)base + offset - (int)(((__SIZE_TYPE__)((const char*)base + offset)) & 15)); /* RXDK360: lvx truncates EA to 16B boundary */",
+                "    return *(const __vector4*)((const char*)base + offset);",
+                "    return *(const __vector4*)((const char*)base + offset - (int)(((__SIZE_TYPE__)((const char*)base + offset)) & 15)); /* RXDK360: lvx truncates EA to 16B boundary */");
+            ReplaceOnce(vint,
+                "    *(__vector4*)((char*)base + offset) = vSrc;",
+                "    *(__vector4*)((char*)base + offset - (int)(((__SIZE_TYPE__)((char*)base + offset)) & 15)) = vSrc; /* RXDK360: stvx truncates EA to 16B boundary */",
+                "    *(__vector4*)((char*)base + offset) = vSrc;",
+                "    *(__vector4*)((char*)base + offset - (int)(((__SIZE_TYPE__)((char*)base + offset)) & 15)) = vSrc; /* RXDK360: stvx truncates EA to 16B boundary */");
         }
 
         // Rewrite libc++'s _LIBCPP_LIBC_NEWLIB ctype_base branch to build its masks
