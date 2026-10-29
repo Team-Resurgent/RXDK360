@@ -46,10 +46,21 @@ T_RE = re.compile(r"\[T\]\s+(PASS|FAIL|DONE)\b\s*(.*)")
 TITLE_CFLAGS = [
     "-fms-extensions", "-fms-compatibility", "-fdeclspec",
     "-D_WIN32=1", "-D_M_PPCBE=1", "-D_M_PPC=1", "-D_XBOX=1", "-D_XBOX_VER=200",
-    "-D__export=", "-D_SIZE_T_DEFINED", "-D_XM_NO_INTRINSICS_",
+    "-D__export=", "-D_SIZE_T_DEFINED", "-D_MSC_FULL_VER=140050727",
     "-Wno-nonportable-include-path", "-Wno-pragma-pack", "-Wno-ignored-attributes",
     "-I" + XDK_INC, "-I" + TESTS_STDLIB,
 ]
+# RXDK_XNAMATH_VMX=1 exercises the VMX128-intrinsic xnamath path (the clang VMX
+# intrinsic layer in runtime/xbox/clang_vmx_intrinsics.h) instead of the scalar
+# _XM_NO_INTRINSICS_ path -- so the same self-checking test validates both.
+if os.environ.get("RXDK_XNAMATH_VMX") == "1":
+    TITLE_CFLAGS += [
+        "-D__VMX128_SUPPORTED", "-maltivec",
+        "-I" + os.path.join(ROOT, "runtime", "xbox"),
+        "-include", "clang_vmx_intrinsics.h",
+    ]
+else:
+    TITLE_CFLAGS += ["-D_XM_NO_INTRINSICS_"]
 
 
 def kill_stale_xenia():

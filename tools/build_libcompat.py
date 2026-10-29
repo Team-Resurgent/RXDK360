@@ -61,12 +61,16 @@ def flags():
         "-D_MSC_FULL_VER=140050727", "-fdelayed-template-parsing",
         "-Wno-invalid-token-paste", "-Wno-narrowing", "-fwritable-strings", "-fno-autolink",
         "-D_WIN32=1", "-D_M_PPCBE=1", "-D_M_PPC=1", "-D_XBOX=1", "-D_XBOX_VER=200",
-        "-D__export=", "-D_SIZE_T_DEFINED", "-D_XM_NO_INTRINSICS_",
+        "-D__export=", "-D_SIZE_T_DEFINED",
+        # xnamath VMX128 path (match ClangCompile.cs / installer Program.cs so
+        # libcompat shares the title xnamath ABI/codegen -- clang_vmx_intrinsics.h).
+        "-D__VMX128_SUPPORTED", "-maltivec",
         "-Wno-everything",
     ]
     force = [
         "-include", "stdint.h", "-include", "__stddef_max_align_t.h",
         "-include", "rxdk_msvcrt_compat.h", "-include", "rxdk_secure_overloads.h",
+        "-include", "clang_vmx_intrinsics.h",
     ]
     return base + ms + force + ["-isystem", XDK_INC]
 

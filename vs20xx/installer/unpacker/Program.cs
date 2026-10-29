@@ -177,9 +177,13 @@ namespace Rxdk.Xdk.Unpacker
                 "-D_MSC_FULL_VER=140050727", "-fdelayed-template-parsing",
                 "-Wno-invalid-token-paste", "-Wno-narrowing", "-fwritable-strings", "-fno-autolink",
                 "-D_WIN32=1", "-D_M_PPCBE=1", "-D_M_PPC=1", "-D_XBOX=1", "-D_XBOX_VER=200",
-                "-D__export=", "-D_SIZE_T_DEFINED", "-D_XM_NO_INTRINSICS_", "-Wno-everything",
+                "-D__export=", "-D_SIZE_T_DEFINED", "-Wno-everything",
+                // xnamath on the VMX128-intrinsic path (match ClangCompile.cs so
+                // libcompat shares the title ABI/codegen -- see clang_vmx_intrinsics.h).
+                "-D__VMX128_SUPPORTED", "-maltivec",
                 "-include", "stdint.h", "-include", "__stddef_max_align_t.h",
                 "-include", "rxdk_msvcrt_compat.h", "-include", "rxdk_secure_overloads.h",
+                "-include", "clang_vmx_intrinsics.h",
                 "-isystem", xdk,
             };
             var objs = new List<string>();

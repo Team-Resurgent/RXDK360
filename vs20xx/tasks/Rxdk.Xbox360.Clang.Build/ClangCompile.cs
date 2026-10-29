@@ -105,7 +105,16 @@ namespace Rxdk.Xbox360.Clang.Build
                             if (!string.IsNullOrWhiteSpace(inc)) pre.Add("-I" + inc.Trim());
                     if (PreprocessorDefinitions != null)
                         foreach (var d in PreprocessorDefinitions)
-                            if (!string.IsNullOrWhiteSpace(d)) pre.Add("-D" + d.Trim());
+                        {
+                            if (string.IsNullOrWhiteSpace(d)) continue;
+                            // _XM_NO_INTRINSICS_ is defined by the clang Toolset.props for
+                            // the IntelliSense parser only (it can't handle the VMX128
+                            // intrinsics); the real build uses the VMX path (XdkHeaderFlags
+                            // sets __VMX128_SUPPORTED + force-includes clang_vmx_intrinsics.h),
+                            // so drop it here or xnamath falls back to the faulting scalar path.
+                            if (d.Trim() == "_XM_NO_INTRINSICS_") continue;
+                            pre.Add("-D" + d.Trim());
+                        }
                     if (!string.IsNullOrWhiteSpace(AdditionalOptions))
                         foreach (var opt in SplitOptions(AdditionalOptions))
                         {
@@ -259,7 +268,16 @@ namespace Rxdk.Xbox360.Clang.Build
                 // libraries explicitly instead, so drop the directive.
                 "-fno-autolink",
                 "-D_WIN32=1", "-D_M_PPCBE=1", "-D_M_PPC=1", "-D_XBOX=1", "-D_XBOX_VER=200",
-                "-D__export=", "-D_SIZE_T_DEFINED", "-D_XM_NO_INTRINSICS_",
+                "-D__export=", "-D_SIZE_T_DEFINED",
+                // Xbox 360 xnamath on the VMX128-intrinsic path (not the scalar
+                // _XM_NO_INTRINSICS_ fallback, which degrades XMLoad*/vector ops to
+                // scalar lfs that fault on the misaligned (UB) XMFLOAT3* casts ATG
+                // samples make -- e.g. EdgeBasedAA). __VMX128_SUPPORTED selects the
+                // VMX path; -maltivec enables the AltiVec builtins the clang VMX
+                // intrinsic layer (clang_vmx_intrinsics.h, force-included below) is
+                // written over; it also provides native __vector4, so xnamath stays
+                // register-resident and the unaligned vertex reads use lvx/lvlx/vperm.
+                "-D__VMX128_SUPPORTED", "-maltivec",
             });
             // Reconciliation force-includes, AFTER the clang runtime's picolibc.h:
             //  - stdint.h so picolibc's intptr_t/uintptr_t are in scope (we suppress
@@ -271,6 +289,11 @@ namespace Rxdk.Xbox360.Clang.Build
             {
                 "-include", "stdint.h", "-include", "__stddef_max_align_t.h",
                 "-include", "rxdk_msvcrt_compat.h", "-include", "rxdk_secure_overloads.h",
+                // The clang VMX128 intrinsic layer: defines native __vector4 and the
+                // full VMX intrinsic surface over AltiVec, and #defines the stock
+                // <VectorIntrinsics.h> include guard so it replaces that header. Lives
+                // in the config include dir (runtime/config -> include/config).
+                "-include", "clang_vmx_intrinsics.h",
             });
             // Add the XDK headers as SYSTEM includes (-isystem) so clang suppresses
             // the many warnings from the stock MS headers themselves (ignored
