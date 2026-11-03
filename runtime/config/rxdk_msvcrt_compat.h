@@ -142,9 +142,16 @@ static inline int _vscwprintf(const wchar_t *fmt, va_list a)
 static inline int _vsnprintf_s(char *d, size_t dstsize, size_t count, const char *fmt, va_list a)
 { (void)count; return vsnprintf(d, dstsize, fmt, a); }
 /* 4-arg pointer form: _vsnprintf_s(buf, count/_TRUNCATE, fmt, ap) where the size
-   is not separately given -- bound by `count` unless it is _TRUNCATE ((size_t)-1). */
+   is not separately given -- bound by `count` unless it is _TRUNCATE ((size_t)-1).
+   C++ ONLY: this is an overload of the 5-arg form above. C has no overloading, so
+   two _vsnprintf_s definitions made this header fail to compile for every .c source
+   that force-includes it ("conflicting types for '_vsnprintf_s'"). All 4-arg callers
+   are C++ (AtgUtil, FXLDumpInfo, TiledResources, ...); a .c source uses the 5-arg
+   MSVC signature. */
+#ifdef __cplusplus
 static inline int _vsnprintf_s(char *d, size_t count, const char *fmt, va_list a)
 { return vsnprintf(d, count == (size_t)-1 ? 0x7fffffff : count, fmt, a); }
+#endif
 static inline int _snprintf_s(char *d, size_t dstsize, size_t count, const char *fmt, ...)
 { va_list a; int r; va_start(a, fmt); (void)count; r = vsnprintf(d, dstsize, fmt, a); va_end(a); return r; }
 static inline int _snwprintf_s(wchar_t *d, size_t dstsize, size_t count, const wchar_t *fmt, ...)
