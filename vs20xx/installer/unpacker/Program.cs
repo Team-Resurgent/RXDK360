@@ -314,6 +314,24 @@ namespace Rxdk.Xdk.Unpacker
                 "    *(__vector4*)((char*)base + offset - (int)(((__SIZE_TYPE__)((char*)base + offset)) & 15)) = vSrc; /* RXDK360: stvx truncates EA to 16B boundary */",
                 "    *(__vector4*)((char*)base + offset) = vSrc;",
                 "    *(__vector4*)((char*)base + offset - (int)(((__SIZE_TYPE__)((char*)base + offset)) & 15)) = vSrc; /* RXDK360: stvx truncates EA to 16B boundary */");
+
+            // __IsIntConst (ppcintrinsics.h) is an XDK compiler intrinsic that reports
+            // whether its argument folded to a compile-time constant; d3d9.h uses it to
+            // pick a direct call for constant render/sampler states over the device's
+            // function-table path. clang has no such intrinsic, so the stock declaration
+            // `int __IsIntConst(int val);` leaves an out-of-line call: our runtime stub
+            // (ms_crt_compat.c) always returns 0, so every state goes the slow table way
+            // and the object needlessly imports __IsIntConst. __builtin_constant_p is the
+            // exact clang equivalent, so turn the declaration into a macro -- constant
+            // states now take the direct path and the import disappears. The stub stays
+            // (ms_crt_compat.c does not include this header, so the macro cannot clash)
+            // as a harmless fallback for any non-header reference.
+            string ppci = Path.Combine(xboxInc, "ppcintrinsics.h");
+            ReplaceOnce(ppci,
+                "int     __IsIntConst(int val);",
+                "#define __IsIntConst(x) __builtin_constant_p(x) /* RXDK360: clang has no __IsIntConst intrinsic; fold so d3d9.h takes the direct state path */",
+                "int     __IsIntConst(int val);",
+                "#define __IsIntConst(x) __builtin_constant_p(x) /* RXDK360: clang has no __IsIntConst intrinsic; fold so d3d9.h takes the direct state path */");
         }
 
         // Rewrite libc++'s _LIBCPP_LIBC_NEWLIB ctype_base branch to build its masks
