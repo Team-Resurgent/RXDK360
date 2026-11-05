@@ -219,6 +219,17 @@ template <size_t N> inline int _snprintf_s(char (&d)[N], size_t count, const cha
 { va_list a; int r; va_start(a, fmt); (void)count; r = vsnprintf(d, N, fmt, a); va_end(a); return r; }
 template <size_t N> inline int _snwprintf_s(wchar_t (&d)[N], size_t count, const wchar_t *fmt, ...)
 { va_list a; int r; va_start(a, fmt); (void)count; r = vswprintf(d, N, fmt, a); va_end(a); return r; }
+/* MSVC's legacy, non-conforming 2-arg swprintf(dst, fmt, ...): no count, writes
+   until done. picolibc's conforming swprintf requires the count (wchar.h), so
+   stock XDK code using the 2-arg form (e.g. dxerr9) fails to compile against it
+   ("no matching function"). Provide the MSVC overload here, C++ only: it coexists
+   with picolibc's C-linkage 3-arg swprintf because only one declaration has C
+   linkage, and overload resolution picks this one when arg2 is the format string
+   and the 3-arg one when arg2 is a size. Forward to vswprintf with the same
+   effectively-unbounded cap the narrow _vsnprintf_s shim above uses (0x7fffffff),
+   matching MSVC's write-it-all behaviour. */
+static inline int swprintf(wchar_t *d, const wchar_t *fmt, ...)
+{ va_list a; int r; va_start(a, fmt); r = vswprintf(d, 0x7fffffff, fmt, a); va_end(a); return r; }
 #endif
 
 /* ---- stack/heap alloc helpers. _malloca/_freea are paired; use the heap to
