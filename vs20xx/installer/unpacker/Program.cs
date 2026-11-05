@@ -55,12 +55,6 @@ namespace Rxdk.Xdk.Unpacker
                 Report.Line("patched XDK headers in place -> {0}", dstInc);
             }
 
-            // Point libc++'s newlib ctype_base at picolibc's non-colliding __CTYPE_*
-            // names so the 360 never needs the bare _U.._X legacy macros (which clash
-            // with XDK identifiers like float.h's _chgsign(double _X)). Values are
-            // identical, so this is ABI-neutral -- no library rebuild required.
-            if (PatchLibcxxCtype(clangRoot))
-                Report.Line("patched libc++ ctype_base -> __CTYPE_* (no legacy ctype macros)");
             string dstLib = Path.Combine(appRoot, "lib", "xbox");
             if (Directory.Exists(dstLib))
             {
@@ -332,40 +326,6 @@ namespace Rxdk.Xdk.Unpacker
                 "#define __IsIntConst(x) __builtin_constant_p(x) /* RXDK360: clang has no __IsIntConst intrinsic; fold so d3d9.h takes the direct state path */",
                 "int     __IsIntConst(int val);",
                 "#define __IsIntConst(x) __builtin_constant_p(x) /* RXDK360: clang has no __IsIntConst intrinsic; fold so d3d9.h takes the direct state path */");
-        }
-
-        // Rewrite libc++'s _LIBCPP_LIBC_NEWLIB ctype_base branch to build its masks
-        // from picolibc's __CTYPE_* macros instead of the single-letter _U.._X legacy
-        // macros. The two sets have identical values (e.g. _X == __CTYPE_HEX), so the
-        // static const mask constants are unchanged -- purely a source-level rename to
-        // stop the legacy names polluting the global namespace and colliding with the
-        // stock XDK headers. Idempotent (literal replace; second run is a no-op).
-        private static bool PatchLibcxxCtype(string clangRoot)
-        {
-            string path = Path.Combine(clangRoot, "include", "libcxx", "__locale_dir", "ctype_base.h");
-            if (!File.Exists(path))
-                return false;
-            string txt = File.ReadAllText(path);
-            // Each pattern is a full `static_cast<mask>(...)` expression whose ')' anchors
-            // it, so replacements can't overlap; ordered longest-first for clarity.
-            string[][] map = new string[][]
-            {
-                new[] { "static_cast<mask>(_P | _U | _L | _N | _B)", "static_cast<mask>(__CTYPE_PUNCT | __CTYPE_UPPER | __CTYPE_LOWER | __CTYPE_DIGIT | __CTYPE_BLANK)" },
-                new[] { "static_cast<mask>(_X | _N)",                "static_cast<mask>(__CTYPE_HEX | __CTYPE_DIGIT)" },
-                new[] { "static_cast<mask>(_U | _L)",               "static_cast<mask>(__CTYPE_UPPER | __CTYPE_LOWER)" },
-                new[] { "static_cast<mask>(_S)",                    "static_cast<mask>(__CTYPE_SPACE)" },
-                new[] { "static_cast<mask>(_C)",                    "static_cast<mask>(__CTYPE_CNTRL)" },
-                new[] { "static_cast<mask>(_U)",                    "static_cast<mask>(__CTYPE_UPPER)" },
-                new[] { "static_cast<mask>(_L)",                    "static_cast<mask>(__CTYPE_LOWER)" },
-                new[] { "static_cast<mask>(_N)",                    "static_cast<mask>(__CTYPE_DIGIT)" },
-                new[] { "static_cast<mask>(_P)",                    "static_cast<mask>(__CTYPE_PUNCT)" },
-                new[] { "static_cast<mask>(_B)",                    "static_cast<mask>(__CTYPE_BLANK)" },
-            };
-            int n = 0;
-            foreach (var pair in map)
-                if (txt.Contains(pair[0])) { txt = txt.Replace(pair[0], pair[1]); n++; }
-            if (n > 0) File.WriteAllText(path, txt);
-            return n > 0;
         }
 
         // Replace the first occurrence of a fixed anchor (CRLF and LF forms tried
