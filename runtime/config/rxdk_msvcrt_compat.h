@@ -44,6 +44,20 @@
 #include <time.h>      /* localtime_s */
 #include <errno.h>
 
+/* XDK <stddef.h> defines offsetof with the MSVC pointer trick
+ *   (size_t)&reinterpret_cast<const volatile char&>((((s*)0)->m))
+ * (the _WIN64-off, C++ branch). clang rejects reinterpret_cast in a constant
+ * expression, so that offsetof cannot be used in a static_assert, an array
+ * bound, a non-type template argument or a case label -- all of which stock
+ * XDK/ATG C++ does. <stddef.h> is force-included just above and is #pragma once
+ * / _INC_STDDEF guarded, so the title's own later #include <stddef.h> will not
+ * re-expand the macro: override it here with __builtin_offsetof, which IS a
+ * constant expression and yields the identical offset. */
+#ifdef __cplusplus
+#undef offsetof
+#define offsetof(s,m) __builtin_offsetof(s,m)
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif

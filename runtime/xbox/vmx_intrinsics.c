@@ -103,10 +103,35 @@ unsigned int _CountLeadingZeros(long val)
 
 /* ---- scalar PPC intrinsics (ppcintrinsics.h) ---------------------------- */
 
-/* Cache-block hints. On the console these prefetch/flush a cache line; there is
- * nothing to do in a correctness-only model, so they are no-ops. */
-void __dcbt(int offset, const void* base) { (void)offset; (void)base; }
-void __dcbf(int offset, const void* base) { (void)offset; (void)base; }
+/* Cache-block management (ppcintrinsics.h). These name real Xenon cache
+ * instructions, so emit them -- on hardware they have observable effect and
+ * titles that call them (e.g. flushing a buffer before the GPU/XMA DMA reads
+ * it) depend on it. Only __dcbt is advisory (a prefetch hint), but emit it too
+ * for fidelity. The effective address is base+offset; the dcb* forms take
+ * (RA,RB) and RA==0 means the EA is RB alone. The "memory" clobber stops the
+ * compiler reordering the surrounding loads/stores across the cache op, which
+ * is the entire reason the title issued it.
+ *   __dcbt  dcbt  - touch: prefetch the line (hint).
+ *   __dcbf  dcbf  - flush: write the line back if dirty AND invalidate it.
+ *   __dcbst dcbst - store: write the line back to coherency, no invalidate.
+ *   __dcbz  dcbz  - zero:  set the cache block to zero.
+ * (__dcbz128 above is the 128-byte-line variant and already zeroes its block.) */
+void __dcbt(int offset, const void* base)
+{
+    __asm__ __volatile__("dcbt 0,%0" :: "r"((const char*)base + offset) : "memory");
+}
+void __dcbf(int offset, const void* base)
+{
+    __asm__ __volatile__("dcbf 0,%0" :: "r"((const char*)base + offset) : "memory");
+}
+void __dcbst(int offset, const void* base)
+{
+    __asm__ __volatile__("dcbst 0,%0" :: "r"((const char*)base + offset) : "memory");
+}
+void __dcbz(int offset, void* base)
+{
+    __asm__ __volatile__("dcbz 0,%0" :: "r"((char*)base + offset) : "memory");
+}
 
 /* Move From Time Base: the 64-bit Xenon time base. Read hi/lo/hi with a retry so
  * a low-word wrap between the two reads is not observed. */
