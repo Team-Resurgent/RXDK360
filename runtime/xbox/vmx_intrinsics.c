@@ -197,9 +197,26 @@ double __fsel(double fComparand, double fValGE, double fLT)
     return fComparand >= 0.0 ? fValGE : fLT;
 }
 
-/* __emit issues a raw instruction word; the XDK uses it only for the memory
- * barriers __sync/__lwsync/__eieio, so a full barrier is the safe model. */
-void __emit(unsigned int opcode) { (void)opcode; __sync_synchronize(); }
+/* __emit(opcode) issues a raw instruction word. The XDK headers invoke it with
+ * exactly four constant opcodes -- the memory barriers __sync/__lwsync/__eieio
+ * and the YieldProcessor() SMT hint (ppcintrinsics.h) -- so decode each to the
+ * precise instruction its opcode encodes instead of collapsing them all to a
+ * full barrier. The old blanket __sync_synchronize() over-serialized __lwsync()
+ * and __eieio() (a full sync where a lighter fence sufficed) and, worse, turned
+ * YieldProcessor() into a barrier rather than an SMT thread-priority yield. Any
+ * opcode not in the set falls back to a full sync -- conservative, and matching
+ * the previous behavior. Each emits the exact word the header specifies:
+ *   0x7C0004AC sync | 0x7C2004AC lwsync | 0x7C0006AC eieio | 0x7FFFFB78 or 31,31,31 */
+void __emit(unsigned int opcode)
+{
+    switch (opcode) {
+    case 0x7C0004ACu: __asm__ __volatile__("sync"        ::: "memory"); break; /* __sync()          */
+    case 0x7C2004ACu: __asm__ __volatile__("lwsync"      ::: "memory"); break; /* __lwsync()        */
+    case 0x7C0006ACu: __asm__ __volatile__("eieio"       ::: "memory"); break; /* __eieio()         */
+    case 0x7FFFFB78u: __asm__ __volatile__("or 31,31,31" ::: "memory"); break; /* YieldProcessor()  */
+    default:          __sync_synchronize();                             break; /* unknown: full sync */
+    }
+}
 
 /* ---- VMX floating-point vector ops (vectorintrinsics.h) ----------------- */
 
