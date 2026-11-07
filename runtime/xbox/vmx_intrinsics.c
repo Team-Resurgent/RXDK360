@@ -274,22 +274,21 @@ __vector4 __vnmsubfp(__vector4 a, __vector4 b, __vector4 c)  /* c - a*b */
 }
 __vector4 __vmsum3fp(__vector4 a, __vector4 b)               /* 3-way dot, broadcast */
 {
-    float s = a.vector4_f32[0] * b.vector4_f32[0]
-            + a.vector4_f32[1] * b.vector4_f32[1]
-            + a.vector4_f32[2] * b.vector4_f32[2];
-    __vector4 r;
-    for (unsigned i = 0; i < 4u; ++i) r.vector4_f32[i] = s;
-    return r;
+    /* Real Xenon vmsum3fp128 (distinct VMX128 instruction, xo 0x190): a 3-lane
+       dot, not a 4-lane sum with w zeroed. A scalar sum would round differently. */
+    union { __rxvf4_t v; __vector4 s; } ua, ub, ur;
+    ua.s = a; ub.s = b;
+    __asm__("vmsum3fp128 %0, %1, %2" : "=v"(ur.v) : "v"(ua.v), "v"(ub.v));
+    return ur.s;
 }
 __vector4 __vmsum4fp(__vector4 a, __vector4 b)               /* 4-way dot, broadcast */
 {
-    float s = a.vector4_f32[0] * b.vector4_f32[0]
-            + a.vector4_f32[1] * b.vector4_f32[1]
-            + a.vector4_f32[2] * b.vector4_f32[2]
-            + a.vector4_f32[3] * b.vector4_f32[3];
-    __vector4 r;
-    for (unsigned i = 0; i < 4u; ++i) r.vector4_f32[i] = s;
-    return r;
+    /* Real Xenon vmsum4fp128: one instruction, fused multiply-sum of all four
+       lanes, broadcast to every lane. A scalar sum would round differently. */
+    union { __rxvf4_t v; __vector4 s; } ua, ub, ur;
+    ua.s = a; ub.s = b;
+    __asm__("vmsum4fp128 %0, %1, %2" : "=v"(ur.v) : "v"(ua.v), "v"(ub.v));
+    return ur.s;
 }
 __vector4 __vmulfp(__vector4 a, __vector4 b)
 { __vector4 r; for (unsigned i=0;i<4u;++i) r.vector4_f32[i]=a.vector4_f32[i]*b.vector4_f32[i]; return r; }

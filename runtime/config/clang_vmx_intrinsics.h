@@ -211,22 +211,26 @@ _RXVMX __vector4 __vperm(__vector4 a, __vector4 b, __vector4 c){ return _RXV((__
     const __vu4_t _m={ ((mask)&8)?0xffffffffu:0u, ((mask)&4)?0xffffffffu:0u, ((mask)&2)?0xffffffffu:0u, ((mask)&1)?0xffffffffu:0u }; \
     __vector4 _r; _r.vf=(__vf4_t)vec_sel((vd).vu,(__vu4_t)_rot,_m); _r; }))
 
-/* ---- dot products (VMX128 vmsum) ----------------------------------------- */
+/* ---- dot products (VMX128 vmsum) -----------------------------------------
+   The real Xenon vmsum4fp128 is ONE VMX128 instruction: it multiplies the four
+   lanes, sums the products (fused, accumulated low-to-high) and broadcasts the
+   result to every lane. AltiVec has no float multiply-sum, so this used to be
+   emulated as a multiply plus pairwise shuffled adds -- which rounds the four
+   products separately and sums them in a different order ((p0+p2)+(p1+p3)),
+   giving a different result and different NaN propagation than MSVC. Emit the
+   real instruction (the clang MC layer recognizes vmsum4fp128, xo 0x1D0). */
 _RXVMX __vector4 __vmsum4fp(__vector4 a, __vector4 b){
-    __vf4_t p = a.vf * b.vf;
-    __vf4_t s1 = p + __builtin_shufflevector(p,p,2,3,0,1);
-    __vf4_t s2 = s1 + __builtin_shufflevector(s1,s1,1,0,3,2);
-    return _RXV(s2);                       /* dot4 broadcast to all lanes */
+    __vf4_t r;
+    __asm__("vmsum4fp128 %0, %1, %2" : "=v"(r) : "v"(a.vf), "v"(b.vf));
+    return _RXV(r);                        /* dot4 broadcast to all lanes */
 }
 _RXVMX __vector4 __vmsum3fp(__vector4 a, __vector4 b){
-    __vf4_t p = a.vf * b.vf;               /* x y z w */
-    /* Force the w product to +0 by MASKING (not *0: NaN*0=NaN leaves a NaN in w);
-       bitwise-AND clears every bit of lane w, a NaN's included. */
-    const __vu4_t _wmask={0xffffffffu,0xffffffffu,0xffffffffu,0u};
-    p = (__vf4_t)((__vu4_t)p & _wmask);
-    __vf4_t s1 = p + __builtin_shufflevector(p,p,2,3,0,1);
-    __vf4_t s2 = s1 + __builtin_shufflevector(s1,s1,1,0,3,2);
-    return _RXV(s2);                       /* dot3 broadcast to all lanes */
+    /* vmsum3fp128 is a distinct VMX128 instruction (xo 0x190), not a 4-lane sum
+       with lane w zeroed -- masking w and adding a +0 lane would give +0 where
+       the real 3-lane dot gives -0, and differs under NaN ordering/denormals. */
+    __vf4_t r;
+    __asm__("vmsum3fp128 %0, %1, %2" : "=v"(r) : "v"(a.vf), "v"(b.vf));
+    return _RXV(r);                        /* dot3 broadcast to all lanes */
 }
 
 /* ---- D3D pack/unpack (VMX128 vpkd3d/vupkd3d) -----------------------------
