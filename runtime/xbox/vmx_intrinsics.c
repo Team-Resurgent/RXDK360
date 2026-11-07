@@ -4,10 +4,13 @@
  *
  * The stock XDK headers use a handful of Microsoft PowerPC/VMX128 intrinsics
  * that clang does not provide under the MS spellings (they surface as
- * unresolved externals when linking XDK/ATG code). We implement them here with
- * portable, spec-faithful byte semantics - correct on the big-endian PPC target,
- * at a scalar cost (matches the _XM_NO_INTRINSICS_ math path). These have C
- * linkage, matching the XDK header declarations.
+ * unresolved externals when linking XDK/ATG code). Most are implemented here
+ * with portable, spec-faithful byte semantics - correct on the big-endian PPC
+ * target, at a scalar cost (matches the _XM_NO_INTRINSICS_ math path). The
+ * partial vector load/stores (lvlx/lvrx/stvlx/stvrx) instead emit the real
+ * Xenon instructions via inline asm, now that the assembler recognizes them, so
+ * they touch exactly the bytes they own. These have C linkage, matching the XDK
+ * header declarations.
  *
  * References: PowerPC VMX (AltiVec) instruction semantics for lvlx/lvrx/stvewx/
  * vor/vslo, and the Xenon dcbz128 cache op.
@@ -23,31 +26,31 @@ typedef struct __attribute__((aligned(16))) __vector4 {
     };
 } __vector4;
 
+/* A native 16-byte vector, used only to marshal a __vector4 in/out of a vector
+ * register for the real VMX load/store instructions below (lvlx/lvrx/stvlx/
+ * stvrx), which clang has no builtin for. Layout-compatible with __vector4. */
+typedef __attribute__((__vector_size__(16), __aligned__(16))) float __rxvf4_t;
+
 /* Load Vector Left Indexed: EA = base+offset. Load the bytes from EA up to the
  * next 16-byte boundary, left-justified into the register; the rest are zero.
- * (Paired with __lvrx + __vor this performs an unaligned 16-byte load.) */
+ * (Paired with __lvrx + __vor this performs an unaligned 16-byte load.)
+ * Emit the real lvlx: it reads only [EA, boundary) in hardware. RA (base) must
+ * be a nonzero base register -> "b"; RB (offset) -> "r"; EA = base + offset. */
 __vector4 __lvlx(const void* base, int offset)
 {
-    uintptr_t ea = (uintptr_t)base + (uintptr_t)offset;
-    unsigned n = 16u - (unsigned)(ea & 15u);     /* bytes to the boundary */
-    const unsigned char* p = (const unsigned char*)ea;
-    __vector4 r;
-    unsigned char* o = (unsigned char*)&r;
-    for (unsigned i = 0; i < 16u; ++i) o[i] = (i < n) ? p[i] : 0;
-    return r;
+    union { __rxvf4_t v; __vector4 s; } u;
+    __asm__ volatile("lvlx %0, %1, %2" : "=v"(u.v) : "b"(base), "r"(offset) : "memory");
+    return u.s;
 }
 
 /* Load Vector Right Indexed: EA = base+offset. Load the bytes from the previous
- * 16-byte boundary up to EA, right-justified into the register; rest zero. */
+ * 16-byte boundary up to EA, right-justified into the register; rest zero. The
+ * real lvrx touches nothing when EA is 16-byte aligned. */
 __vector4 __lvrx(const void* base, int offset)
 {
-    uintptr_t ea = (uintptr_t)base + (uintptr_t)offset;
-    unsigned n = (unsigned)(ea & 15u);           /* bytes since the boundary */
-    const unsigned char* p = (const unsigned char*)(ea - n);
-    __vector4 r;
-    unsigned char* o = (unsigned char*)&r;
-    for (unsigned i = 0; i < 16u; ++i) o[i] = (i >= 16u - n) ? p[i - (16u - n)] : 0;
-    return r;
+    union { __rxvf4_t v; __vector4 s; } u;
+    __asm__ volatile("lvrx %0, %1, %2" : "=v"(u.v) : "b"(base), "r"(offset) : "memory");
+    return u.s;
 }
 
 /* Store Vector Element Word Indexed: store the word element selected by EA's
@@ -518,15 +521,17 @@ __vector4 __lvsl_volatile(const volatile void* base, int offset){ return __lvsl(
 __vector4 __lvsr_volatile(const volatile void* base, int offset){ return __lvsr((const void*)base,offset); }
 
 /* Store Vector Left/Right Indexed: partial stores, the mirror of __lvlx/__lvrx.
-   stvlx stores bytes [EA, next-16-boundary); stvrx stores [prev-boundary, EA). */
+   stvlx stores bytes [EA, next-16-boundary); stvrx stores [prev-boundary, EA).
+   Emit the real instructions: each writes ONLY the bytes on its side of the EA,
+   so together they store exactly the vector's 16 bytes with no read-modify-write
+   of neighbouring bytes (RXDK-360 finding #18). EA = base + offset; RA (base) is
+   a nonzero base register -> "b". */
 void __stvlx(__vector4 vSrc, void* base, int offset)
-{ uintptr_t ea=(uintptr_t)base+(uintptr_t)offset; unsigned n=16u-(unsigned)(ea&15u);
-  const unsigned char* s=(const unsigned char*)&vSrc; unsigned char* p=(unsigned char*)ea;
-  for(unsigned i=0;i<n;++i) p[i]=s[i]; }
+{ union { __rxvf4_t v; __vector4 s; } u; u.s = vSrc;
+  __asm__ volatile("stvlx %0, %1, %2" : : "v"(u.v), "b"(base), "r"(offset) : "memory"); }
 void __stvrx(__vector4 vSrc, void* base, int offset)
-{ uintptr_t ea=(uintptr_t)base+(uintptr_t)offset; unsigned n=(unsigned)(ea&15u);
-  const unsigned char* s=(const unsigned char*)&vSrc; unsigned char* p=(unsigned char*)(ea-n);
-  for(unsigned i=0;i<n;++i) p[i]=s[16u-n+i]; }
+{ union { __rxvf4_t v; __vector4 s; } u; u.s = vSrc;
+  __asm__ volatile("stvrx %0, %1, %2" : : "v"(u.v), "b"(base), "r"(offset) : "memory"); }
 void __stvlx_volatile(__vector4 v, volatile void* base, int offset){ __stvlx(v,(void*)base,offset); }
 void __stvrx_volatile(__vector4 v, volatile void* base, int offset){ __stvrx(v,(void*)base,offset); }
 

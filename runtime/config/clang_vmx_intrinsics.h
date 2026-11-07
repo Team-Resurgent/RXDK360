@@ -78,12 +78,23 @@ _RXVMX __vector4 __lvx(const void* base, int offset) {
 _RXVMX __vector4 __lvx_volatile(const volatile void* base, int offset) {
     return _RXV(vec_ld(offset, (const float*)base));
 }
-/* left/right indexed unaligned loads */
+/* left/right indexed partial loads. These MUST emit the real Xenon lvlx/lvrx:
+   altivec.h's vec_lvlx/vec_lvrx emulate them as lvx+lvsl+vperm, reading the
+   WHOLE aligned block around the EA -- which faults past mapped memory on an
+   aligned EA (where the real lvrx touches nothing) and, paired with the store
+   side below, lets __storeunalignedvector rewrite bytes it does not own
+   (RXDK-360 finding #18). lvlx loads [EA, next 16B boundary) left-justified;
+   lvrx loads [prev 16B boundary, EA) right-justified. EA = base + offset; RA
+   (base) must be a nonzero base register -> "b" constraint. */
 _RXVMX __vector4 __lvlx(const void* base, int offset) {
-    return _RXV(vec_lvlx(offset, (const float*)base));
+    __vf4_t r;
+    __asm__ volatile("lvlx %0, %1, %2" : "=v"(r) : "b"(base), "r"(offset) : "memory");
+    return _RXV(r);
 }
 _RXVMX __vector4 __lvrx(const void* base, int offset) {
-    return _RXV(vec_lvrx(offset, (const float*)base));
+    __vf4_t r;
+    __asm__ volatile("lvrx %0, %1, %2" : "=v"(r) : "b"(base), "r"(offset) : "memory");
+    return _RXV(r);
 }
 /* shift control vectors for software alignment */
 _RXVMX __vector4 __lvsl(const void* base, int offset) {
@@ -100,11 +111,17 @@ _RXVMX void __stvx(__vector4 s, void* base, int offset) {
 _RXVMX void __stvx_volatile(__vector4 s, volatile void* base, int offset) {
     vec_st(s.vf, offset, (float*)base);
 }
+/* left/right indexed partial stores. Real Xenon stvlx/stvrx: each writes ONLY
+   the bytes on its side of the EA, so the pair stores exactly the 16 bytes of
+   the vector with no read-modify-write of neighbouring bytes (RXDK-360 #18).
+   altivec.h's vec_stvlx/vec_stvrx loaded the whole aligned block, merged, and
+   stored it back -- a data race vs. another thread or the audio HW owning the
+   untouched bytes. EA = base + offset; RA (base) is a nonzero base reg -> "b". */
 _RXVMX void __stvlx(__vector4 s, void* base, int offset) {
-    vec_stvlx(s.vf, offset, (vector float*)base);
+    __asm__ volatile("stvlx %0, %1, %2" : : "v"(s.vf), "b"(base), "r"(offset) : "memory");
 }
 _RXVMX void __stvrx(__vector4 s, void* base, int offset) {
-    vec_stvrx(s.vf, offset, (vector float*)base);
+    __asm__ volatile("stvrx %0, %1, %2" : : "v"(s.vf), "b"(base), "r"(offset) : "memory");
 }
 _RXVMX void __stvewx(__vector4 s, void* base, int offset) {
     vec_ste(s.vu, offset, (unsigned int*)base);
